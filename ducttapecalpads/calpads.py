@@ -18,7 +18,7 @@ from ducttape.utils import (
     DriverBuilder,
     LoggingMixin
 )
-from calpads_config import EXTRACT_COLUMNS
+from .calpads_config import EXTRACT_COLUMNS
 
 class Calpads(WebUIDataSource, LoggingMixin):
     """Class for interacting with the web ui of CALPADS"""

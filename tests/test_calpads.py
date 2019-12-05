@@ -5,7 +5,7 @@ import configparser
 import logging
 import sys
 import pandas as pd
-from ducttape-calpads import calpads as cp
+from ducttapecalpads import calpads as cp
 from ducttape.exceptions import (
     InvalidLoginCredentials,
     ReportNotFound,
