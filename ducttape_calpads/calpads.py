@@ -735,28 +735,28 @@ class Calpads(WebUIDataSource, LoggingMixin):
         else:
             return False
     
-    def download_snapshot_report(self, lea_code, report_code, academic_year='2018-2019',
-    month=None, day=None, snapshot_status='Certified', dl_type='csv', max_attempts=10, temp_folder_name=None, use_session=True, session_exclude = False):
-        """
-        Download a CALPADS report to the CALPADS' folder. 
+    def download_snapshot_report(self, lea_code, report_code, snapshot_status='Certified', 
+                                dl_type='csv', max_attempts=10, temp_folder_name=None):
+        """Download a CALPADS snapshot report in a specified format. 
         
-        User inputs the report_code of interest and some other optional variables.
-        
-        Parameters:
-        lea: one of the LEA keys in calpads_lea_values in config file
-        report_code (str): Currently support '8.1', '1.17', and '1.18'
-        academic_year (str) optional: Use format YYYY-YYYY, current school year is generally the CALPADS default.
-        month (str) optional: Expects 1-12, but defaults to today's month
-        day (str) optional: Expects 1 to n, n=number of possible days in that month in that year
-        snapshot_status: Certified by default, pass in 'Revised Uncertified' to use the alternative value. For Snapshots only.
-        dl_type (str): The format in which you want the download for the report. Currently supports, csv,excel, and pdf.
-        max_attempts (int): how often to keep trying to check if view report is clickable or if the download dropdown is visible. \
-            Each additional attempt is a 1 minute wait time.
-        use_session bool: track which leas have been checked - allows to more efficiently "recover" where one left off. Defaults to True.
-        session_exclude bool: requires use_session and defaults to False. If True, using the sessions, skips an item if it's marked True this session.
+        Args:
+            lea_code (str): The 7 digit identifier for your LEA passed in as a string.
+            report_code (str): Currently supports all known reports. Expected format is a string e.g. '8.1', '1.17', and '1.18'.
+                For reports that have letters in them, for example the 8.1 EOY3, expected input is '8.1eoy3' OR '8.1EOY3'. 
+                No spaces, all one word.
+            academic_year (str): Use format YYYY-YYYY.
+            snapshot_status (str): Defaults to 'Certified'.
+                Pass in a string of other options (e.g. 'Revised Uncertified') to use the alternative value.
+            dl_type (str): The format in which you want the download for the report. 
+                Currently supports: csv, excel, and pdf.
+            max_attempts (int): how often to keep trying to check if view report is clickable or if the download dropdown is visible.
+                Each additional attempt is a 1 minute wait time.
+            temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. 
+            If this directory does not exist, it will be created. The parent directory will be the temp_folder_path passed in
+            when instantiating the Calpads object. If None, a temporary directory will be created and deleted as part of cleanup.
         
         Returns:
-        bool: True for a successful download of report, else False.
+            bool: True for a successful download of report, else False.
         """
         report_code = report_code.lower()
 
@@ -795,7 +795,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
             view_report.click()
             #Some reports require two clicks of View Report for no apparent reason
-            if report_code in ['3.2', '3.3', '8.1_EOY3', '1.21'] and self.__wait_for_view_report_clickable(1):
+            if report_code in ['3.2', '3.3', '8.1eoy3', '1.21'] and self.__wait_for_view_report_clickable(1):
                 view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00')
                 view_report.click()
 
