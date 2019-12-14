@@ -281,14 +281,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
         
         #Select the schools (generally move all) TODO: Consider supporting selective school selection
         if by_date_range:
-            self.driver.find_element_by_xpath("//*[contains(@id, 'btnDateRange')]").click()
+            self.driver.find_element_by_xpath("//*[contains(text(), 'Date Range')]").click()
         if extract_name != 'SDEM':
             self.__move_all_for_extract_request(by_date_range=by_date_range)
 
 
         #Need specific method handlers for the extracts. Dispatch to form handlers
         form_handlers = {
-            'SSID': lambda: self.__fill_ssid_request_extract(lea_code),
+            'SSID': lambda: self.__fill_ssid_request_extract(lea_code, by_date_range, start_date, end_date),
             'DIRECTCERTIFICATION': lambda: self.__fill_dc_request_extract(),
             'SENR': lambda: self.__fill_senr_request_extract(by_date_range,start_date,end_date),
             'SELA': lambda: self.__fill_sela_request_extract(by_date_range, start_date, end_date),
@@ -368,7 +368,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         self.driver.find_element_by_xpath(start_date_xpath).send_keys(start_date)
         self.driver.find_element_by_xpath(end_date_xpath).send_keys(end_date)
 
-    def __fill_ssid_request_extract(self, lea_code):
+    def __fill_ssid_request_extract(self, lea_code, by_date_range, start_date, end_date):
         """Messiest extract request handler. Assumes that a recent SENR file has been fully Posted for the SSID extract to be current."""
         #We're going back to FileSubmission because we need the job ID for the latest file upload.
         self.driver.get('https://www.calpads.org/FileSubmission')
@@ -387,15 +387,26 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #navigate to extract page
         self.driver.get('https://www.calpads.org/Extract/SSIDExtract')
 
+        if not by_date_range:
+            jobid_option_xpath = '//*[@id="SelectedJobIDssidExtractbyJob"]/option'
+            select_id = 'SelectedJobIDssidExtractbyJob'
+            grade_level_xpath = '//*[@id="GradeLevel"]'
+        else:
+            self.driver.find_element_by_xpath("//*[contains(text(), 'Date Range')]").click()
+            jobid_option_xpath = '//*[@id="SelectedJobIDssidExtractbyDate"]/option'
+            select_id = 'SelectedJobIDssidExtractbyDate'
+            grade_level_xpath = '//div[@id="DateRange"]//select[@id="GradeLevel"]'
+            self._fill_typical_date_range_form(start_date, end_date)
+
         try:
             #TODO: More dynamic jobid selection? Or always assume the latest upload/import?
-            jobid_option = WebDriverWait(self.driver, self.wait_time).until(EC.element_located_selection_state_to_be((By.XPATH,'//*[@id="SelectedJobIDssidExtractbyJob"]/option'), True))
+            jobid_option = WebDriverWait(self.driver, self.wait_time).until(EC.element_located_selection_state_to_be((By.XPATH,jobid_option_xpath), True))
         except TimeoutException:
             self.log.info('Job ID failed to automatically populate for SSID Extract for {}. Did you post the file you uploaded yet?'.format(lea_code))
             raise ReportNotReady
         else:
-            WebDriverWait(self.driver, self.wait_time).until(EC.element_located_selection_state_to_be((By.XPATH,'//*[@id="SelectedJobIDssidExtractbyJob"]/option'), True))
-            select = Select(self.driver.find_element_by_id('SelectedJobIDssidExtractbyJob'))
+            WebDriverWait(self.driver, self.wait_time).until(EC.element_located_selection_state_to_be((By.XPATH,jobid_option_xpath), True))
+            select = Select(self.driver.find_element_by_id(select_id))
             #Find the element that's been pre-selected
         for opt in select.all_selected_options: #TODO: this returned stale element once for some reason...
             self.driver.execute_script("arguments[0].removeAttribute('selected')", opt)
@@ -408,7 +419,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         
         self.__move_all_for_extract_request()
         #Defaulting to all grades TODO: Maybe support specific grades? Doubt it'd be useful.
-        all_grades = Select(self.driver.find_element_by_id('GradeLevel'))
+        all_grades = Select(self.driver.find_element_by_xpath(grade_level_xpath))
         all_grades.select_by_visible_text('All')
         
     def __fill_sprg_request_extract(self, active_students, by_date_range, start_date, end_date):
