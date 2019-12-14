@@ -249,7 +249,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
         extract_name = extract_name.upper()
 
         #Some validations of required Args
-        if extract_name in ['CENR', 'SCSC']:
+        if extract_name in ['CRSC', 'CRSE', 'SASS', 'SCSC', 'STAS',
+                            'SCTE', 'SCSE', 'SDIS']:
             assert academic_year, "For {} Extract, academic_year is required. Format YYYY-YYYY".format(extract_name)
 
         #set up driver
@@ -292,7 +293,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
             'SENR': lambda: self.__fill_senr_request_extract(by_date_range,start_date,end_date),
             'SELA': lambda: self.__fill_sela_request_extract(by_date_range, start_date, end_date),
             'SPRG': lambda: self.__fill_sprg_request_extract(active_students, by_date_range, start_date, end_date),
-            'CENR': lambda: self.__fill_cenr_request_extract(academic_year, adjusted_enroll),
+            'CENR': lambda: self.__fill_cenr_request_extract(academic_year, adjusted_enroll, by_date_range,
+                                                            start_date, end_date),
             'SINF': lambda: self.__fill_sinf_request_extract(by_date_range, start_date, end_date),
             'CRSC': lambda: self.__fill_crsc_request_extract(academic_year),
             'CRSE': lambda: self.__fill_crse_request_extract(academic_year),
@@ -355,15 +357,16 @@ class Calpads(WebUIDataSource, LoggingMixin):
 
     def _fill_typical_date_range_form(self, start_date, end_date):
         """Fills in the typical date range form"""
+        start_date_xpath = "//div[contains(@id, 'DateRange')]//input[contains(@id, 'StartDate')]"
+        end_date_xpath = "//div[contains(@id, 'DateRange')]//input[contains(@id, 'EndDate')]"
         try:
-            WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.ID, 'EnrollmentStartDate')))
+            WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.XPATH, start_date_xpath)))
         except TimeoutException:
             self.log.info("The extract request was unsuccessful.")
             self.driver.close()
             return False
-        # self.__move_all_for_extract_request(by_date_range)
-        self.driver.find_element_by_id("EnrollmentStartDate").send_keys(start_date)
-        self.driver.find_element_by_id("EnrollmentEndDate").send_keys(end_date)
+        self.driver.find_element_by_xpath(start_date_xpath).send_keys(start_date)
+        self.driver.find_element_by_xpath(end_date_xpath).send_keys(end_date)
 
     def __fill_ssid_request_extract(self, lea_code):
         """Messiest extract request handler. Assumes that a recent SENR file has been fully Posted for the SSID extract to be current."""
@@ -462,7 +465,6 @@ class Calpads(WebUIDataSource, LoggingMixin):
         if by_date_range:
             self._fill_typical_date_range_form(start_date, end_date)
 
-    
     def __fill_crsc_request_extract(self, academic_year):
         """Handler for CRSC Extract request form."""
         if academic_year:
@@ -535,21 +537,25 @@ class Calpads(WebUIDataSource, LoggingMixin):
         if effective_end_date:
             self.driver.find_element_by_id('EffectiveEndDate').send_keys(effective_end_date)
 
-    def __fill_cenr_request_extract(self, academic_year, adjusted_enroll):
+    def __fill_cenr_request_extract(self, academic_year, adjusted_enroll, by_date_range, start_date, end_date):
         """Handler for CENR Extract request form.
         Args:
-        adjusted_enroll (bool): Adjusted cumulative enrollment. When True, pulls students with enrollments dates that fall in the typical school year.\
-            When False, it pulls students with enrollments from July to June (7/1/YYYY - 6/30/YYYZ)
-        academic_year (str): a string in the format, YYYY-YYYY, e.g. 2018-2019.
+            adjusted_enroll (bool): Adjusted cumulative enrollment. When True, pulls students with enrollments dates that fall in the typical school year.
+                When False, it pulls students with enrollments from July to June (7/1/YYYY - 6/30/YYYZ)
+            academic_year (str): a string in the format, YYYY-YYYY, e.g. 2018-2019.
         """
-        #Defaulting to all grades TODO: Maybe support specific grades? Doubt it'd be useful.
-        all_grades = Select(self.driver.find_element_by_id('GradeLevel'))
-        all_grades.select_by_visible_text('All')
+        if not by_date_range:
+            #Academic year
+            year = self.driver.find_element_by_name('AcademicYear_input')
+            year.clear()
+            year.send_keys(academic_year)
+            all_grades = Select(self.driver.find_element_by_id('GradeLevel'))
+        else:
+            self._fill_typical_date_range_form(start_date, end_date)
+            all_grades = Select(self.driver.find_element_by_xpath("//div[contains(@id, 'DateRange')]//select[@id='GradeLevel']"))
 
-        #Academic year
-        year = self.driver.find_element_by_name('AcademicYear_input')
-        year.clear()
-        year.send_keys(academic_year)
+        #Defaulting to all grades TODO: Maybe support specific grades? Doubt it'd be useful.
+        all_grades.select_by_visible_text('All')
 
     def download_extract(self, lea_code, extract_name, temp_folder_name=None, max_attempts=10, pandas_read_csv_kwargs={}):
         """
