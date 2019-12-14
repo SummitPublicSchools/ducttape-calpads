@@ -279,10 +279,10 @@ class Calpads(WebUIDataSource, LoggingMixin):
             raise ReportNotFound
         
         #Select the schools (generally move all) TODO: Consider supporting selective school selection
-        if extract_name == 'SENR' and by_date_range:
-            self.driver.find_element_by_id("btnDateRangeSenr").click()
-        elif extract_name != 'SDEM':
-            self.__move_all_for_extract_request()
+        if by_date_range:
+            self.driver.find_element_by_xpath("//*[contains(@id, 'btnDateRange')]").click()
+        if extract_name != 'SDEM':
+            self.__move_all_for_extract_request(by_date_range=by_date_range)
 
 
         #Need specific method handlers for the extracts. Dispatch to form handlers
@@ -290,10 +290,10 @@ class Calpads(WebUIDataSource, LoggingMixin):
             'SSID': lambda: self.__fill_ssid_request_extract(lea_code),
             'DIRECTCERTIFICATION': lambda: self.__fill_dc_request_extract(),
             'SENR': lambda: self.__fill_senr_request_extract(by_date_range,start_date,end_date),
-            'SELA': lambda: self.__fill_sela_request_extract(),
-            'SPRG': lambda: self.__fill_sprg_request_extract(active_students),
+            'SELA': lambda: self.__fill_sela_request_extract(by_date_range, start_date, end_date),
+            'SPRG': lambda: self.__fill_sprg_request_extract(active_students, by_date_range, start_date, end_date),
             'CENR': lambda: self.__fill_cenr_request_extract(academic_year, adjusted_enroll),
-            'SINF': lambda: self.__fill_sinf_request_extract(),
+            'SINF': lambda: self.__fill_sinf_request_extract(by_date_range, start_date, end_date),
             'CRSC': lambda: self.__fill_crsc_request_extract(academic_year),
             'CRSE': lambda: self.__fill_crse_request_extract(academic_year),
             'SASS': lambda: self.__fill_sass_request_extract(academic_year),
@@ -309,14 +309,10 @@ class Calpads(WebUIDataSource, LoggingMixin):
         form_handlers[extract_name]()
 
         #Click request button
-        if extract_name != 'SPRG': #DateRangeSenr > form > div.form-row.mt-5 > div > button
-            if not by_date_range:
-                req = self.driver.find_element_by_class_name('btn-primary')
-            else:
-                req = self.driver.find_element_by_css_selector('#DateRangeSenr .btn-primary')
+        if not by_date_range:
+            req = self.driver.find_element_by_xpath("//button[contains(text(), 'Request File')]")
         else:
-            #Currently, SPRG page has a btn-secondary class.
-            req = self.driver.find_element_by_class_name('btn-secondary')
+            req = self.driver.find_element_by_xpath("//div[contains(@id, 'DateRange')]//button[contains(text(), 'Request File')]")
         req.click()
         try:
             WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.CLASS_NAME, 'alert-success')))
@@ -335,26 +331,39 @@ class Calpads(WebUIDataSource, LoggingMixin):
         """Refactored method to click move all in request extract forms"""
         #Defaults to the first moveall button which is generally what we want. TODO: Consider supporting other extract request methods. e.g. date range, etc.
         time.sleep(2) #TODO: Don't think there's something explicit to wait for here, the execution seems to be going too fast causes errors on SCSC
+        select_xpath = "//div[contains(@id, 'DateRange')]//select[@id='bootstrap-duallistbox-nonselected-list_School']"
         if not by_date_range:
             select = Select(self.driver.find_element_by_id('bootstrap-duallistbox-nonselected-list_School'))
         else:
-            select = Select(self.driver.find_element_by_css_selector('div#DateRangeSenr #bootstrap-duallistbox-nonselected-list_School'))
+            select = Select(self.driver.find_element_by_xpath(select_xpath)) #TODO: GENERALIZE FOR ALL EXTRACTS
         static_options = len(select.options)
         n = 0
         #Going to click moveall multiple times, but I think the time.sleep() above actually solves the need for this.
         while n < static_options:
-            try:
+            if not by_date_range:
                 moveall = self.driver.find_elements_by_class_name('moveall')[0]
                 moveall.click()
-            except ElementNotVisibleException: #For when you are using DateRange #TODO: Confirm behavior for all extracts.
-                moveall = self.driver.find_elements_by_class_name('moveall')[1]
+            else: #For when you are using DateRange #TODO: Confirm behavior for all extracts.
+                moveall = self.driver.find_elements_by_xpath("//div[contains(@id, 'DateRange')]//button[contains(@title, 'Move all')]")[-1]
                 moveall.click()
             n += 1
-        if not by_date_range:
+        if not by_date_range: #TODO: GENERALIZE FOR ALL EXTRACTS
             assert Select(self.driver.find_element_by_id('bootstrap-duallistbox-nonselected-list_School')).options.__len__() == 0, "Failed to select all of the school options"
         else:
-            assert Select(self.driver.find_element_by_css_selector('div#DateRangeSenr #bootstrap-duallistbox-nonselected-list_School')).options.__len__() == 0, "Failed to select all of the school options"
+            assert Select(self.driver.find_element_by_xpath(select_xpath)).options.__len__() == 0, "Failed to select all of the school options"
         #TODO: Confirm that we don't need to wait for anything here.
+
+    def _fill_typical_date_range_form(self, start_date, end_date):
+        """Fills in the typical date range form"""
+        try:
+            WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.ID, 'EnrollmentStartDate')))
+        except TimeoutException:
+            self.log.info("The extract request was unsuccessful.")
+            self.driver.close()
+            return False
+        # self.__move_all_for_extract_request(by_date_range)
+        self.driver.find_element_by_id("EnrollmentStartDate").send_keys(start_date)
+        self.driver.find_element_by_id("EnrollmentEndDate").send_keys(end_date)
 
     def __fill_ssid_request_extract(self, lea_code):
         """Messiest extract request handler. Assumes that a recent SENR file has been fully Posted for the SSID extract to be current."""
@@ -399,19 +408,38 @@ class Calpads(WebUIDataSource, LoggingMixin):
         all_grades = Select(self.driver.find_element_by_id('GradeLevel'))
         all_grades.select_by_visible_text('All')
         
-    def __fill_sprg_request_extract(self, active_students):
+    def __fill_sprg_request_extract(self, active_students, by_date_range, start_date, end_date):
         """Handler for SPRG Extract Request form. Mostly just for selecting all programs in the required field.
         Args:
         active_students (bool): when True, extract only pulls students without an exit date in the program. i.e. have NULL exit dates.
         """
         #Check off Active Students
-        if active_students:
-            elem = self.driver.find_element_by_id('ActiveStudentsprgAcdmcYear')
-            elem.click()
-            #TODO: Confirm no need to wait
-        
+        if not by_date_range:
+            if active_students:
+                elem = self.driver.find_element_by_id('ActiveStudentsprgAcdmcYear')
+                elem.click()
+                #TODO: Confirm no need to wait
+            
+            select = Select(self.driver.find_element_by_id('EducationProgramCodesprgAcdmcYear'))
+        else:
+            try:
+                WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.ID, 'EnrollmentStartDate')))
+            except TimeoutException:
+                self.log.info("The extract request was unsuccessful.")
+                self.driver.close()
+                return False
+            
+            if active_students:
+                elem = self.driver.find_element_by_id('ActiveStudentsprgDateRange')
+                elem.click()
+                #TODO: Confirm no need to wait
+            
+            self.driver.find_element_by_id("EnrollmentStartDate").send_keys(start_date)
+            self.driver.find_element_by_id("EnrollmentEndDate").send_keys(end_date)
+            
+            select = Select(self.driver.find_element_by_id('EducationProgramCodesprgDateRange'))
+
         #Select programs - defaulting to All TODO: Support specific programs.
-        select = Select(self.driver.find_element_by_id('EducationProgramCodesprgAcdmcYear'))
         select.select_by_value("All")
         #TODO: Confirm no need to wait
 
@@ -419,26 +447,20 @@ class Calpads(WebUIDataSource, LoggingMixin):
         """Handler for Direct Certification Extract request form. Currently only supports default values at loading."""
         pass
     
-    def __fill_sinf_request_extract(self):
+    def __fill_sinf_request_extract(self, by_date_range, start_date, end_date):
         """Handler for SINF Extract request form. Currently only supports default values at loading."""
-        pass
+        if by_date_range:
+            self._fill_typical_date_range_form(start_date, end_date)
     
-    def __fill_sela_request_extract(self):
+    def __fill_sela_request_extract(self, by_date_range, start_date, end_date):
         """Handler for SELA Extract request form. Currently only supports default values at loading."""
-        pass
+        if by_date_range:
+            self._fill_typical_date_range_form(start_date, end_date)
     
     def __fill_senr_request_extract(self, by_date_range,start_date,end_date):
         """Handler for SENR Extract request form. Currently only supports default values at loading."""
         if by_date_range:
-            try:
-                WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.ID, 'EnrollmentStartDate')))
-            except TimeoutException:
-                self.log.info("The extract request was unsuccessful.")
-                self.driver.close()
-                return False
-            self.__move_all_for_extract_request(by_date_range)
-            self.driver.find_element_by_id("EnrollmentStartDate").send_keys(start_date)
-            self.driver.find_element_by_id("EnrollmentEndDate").send_keys(end_date)
+            self._fill_typical_date_range_form(start_date, end_date)
 
     
     def __fill_crsc_request_extract(self, academic_year):
@@ -765,7 +787,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             return False
     
     def download_snapshot_report(self, lea_code, report_code, snapshot_status='Certified', 
-                                dl_type='csv', max_attempts=10, temp_folder_name=None):
+                                academic_year='2019-2020', dl_type='csv', max_attempts=10, temp_folder_name=None):
         """Download a CALPADS snapshot report in a specified format. 
         
         Args:
