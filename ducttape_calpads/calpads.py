@@ -256,7 +256,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                                         'SCTE', 'SCSE', 'SDIS']
 
         #Some validations of required Args
-        if extract_name in academic_year_only_extracts:
+        if extract_name in academic_year_only_extracts or (extract_name == 'CENR' and not by_date_range):
             assert academic_year, "For {} Extract, academic_year is required. Format YYYY-YYYY".format(extract_name)
         if by_date_range and extract_name != 'SDEM' and extract_name not in academic_year_only_extracts:
             assert start_date and end_date, "If by_date_range is True, start_date and end_date are required."
@@ -290,10 +290,10 @@ class Calpads(WebUIDataSource, LoggingMixin):
             raise ReportNotFound
         
         #Select the schools (generally move all) TODO: Consider supporting selective school selection
-        if by_date_range and extract_name != 'SDEM' and extract_name not in academic_year_only_extracts:
+        if by_date_range and extract_name not in  ['SDEM', 'DIRECTCERTIFICATION'] and extract_name not in academic_year_only_extracts:
             self.driver.find_element_by_xpath("//*[contains(text(), 'Date Range')]").click()
         
-        if extract_name != 'SDEM':
+        if extract_name in ['SDEM', 'DIRECTCERTIFICATION']:
             self.__move_all_for_extract_request(extract_name, academic_year_only_extracts, by_date_range=by_date_range)
 
 
@@ -644,7 +644,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             'CENR': 'Cumulative Enrollment ODS Download',
             'SASS': 'Staff Assignment ODS Download',
             'SDEM': 'Staff Demographics ODS Download',
-            'STAS': 'Student Absence Summary ODS Download',
+            'STAS': 'Student Absence ODS Download',
             'SDIS': 'Student Discipline ODS Download',
             'CRSE': 'Course Section Enrollment ODS Download',
             'CRSC': 'Course Section Completion ODS Download',

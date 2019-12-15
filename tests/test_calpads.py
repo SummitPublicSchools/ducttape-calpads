@@ -22,6 +22,12 @@ logger.addHandler(stream_handler)
 config = configparser.ConfigParser()
 config.read('./config/config.ini')
 
+EXTRACTS = ['ssid', 'crsc', 'crse', 'sass', 'stas', 'scte',
+            'scsc', 'scse', 'sdis', 'sdem', 'sprg', 'cenr',
+            'sped', 'sela', 'sinf', 'ssrv', 'directcertification']
+YEAR_ONLY_EXTRACTS = ['crsc', 'crse', 'sass', 'scsc', 'stas',
+                    'scte', 'scse', 'sdis']
+
 class TestCalpadsDataSource(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -66,27 +72,50 @@ class TestCalpadsExtracts(unittest.TestCase):
     def tearDown(self):
         if os.path.exists(config['Calpads']['temp_folder_path']):
             shutil.rmtree(config['Calpads']['temp_folder_path'])
+        self.cp.driver.quit()
 
-    def test_request_ssid(self):
-        self.assertTrue(self.cp.request_extract(lea_code=config['Calpads']['test_lea'],
-                                                extract_name='ssid'))
-
-    def test_request_ssid_by_date_range(self):
-        self.assertTrue(self.cp.request_extract(lea_code=config['Calpads']['test_lea'],
-                                                extract_name='ssid',
-                                                by_date_range=True,
-                                                start_date='08/01/2019',
-                                                end_date='07/01/2020'))
+    def test_request_extracts_nonyear(self):
+        for extract in EXTRACTS:
+            if extract not in YEAR_ONLY_EXTRACTS and extract != 'cenr':
+                with self.subTest(extract=extract):
+                    self.assertTrue(self.cp.request_extract(lea_code=config['Calpads']['test_lea'],
+                                                            extract_name=extract))
     
-    def test_download_extract_ssid_df(self):
-        self.cp.request_extract(lea_code=config['Calpads']['test_lea'],
-                                                extract_name='ssid')
-        self.assertIsInstance(self.cp.download_extract(lea_code=config['Calpads']['test_lea'],
-                                                        extract_name='ssid'), pd.DataFrame)
+    def test_request_extracts_academic_year(self):
+        for extract in EXTRACTS:
+            if extract in YEAR_ONLY_EXTRACTS or extract == 'cenr':
+                with self.subTest(extract=extract):
+                    self.assertTrue(self.cp.request_extract(lea_code=config['Calpads']['test_lea'],
+                                                            extract_name=extract,
+                                                            academic_year=config['Calpads']['current_academic_year']))
+
+    def test_request_extracts_by_date_range(self):
+        test_extracts = list(set(EXTRACTS) - set(YEAR_ONLY_EXTRACTS))
+        for extract in test_extracts:
+            with self.subTest(extract=extract):
+                self.assertTrue(self.cp.request_extract(lea_code=config['Calpads']['test_lea'],
+                                                        extract_name=extract,
+                                                        by_date_range=True,
+                                                        start_date='08/01/2019',
+                                                        end_date='07/01/2020'))
+    
+    def test_download_extracts_dataframe(self):
+        for extract in EXTRACTS:
+            with self.subTest(extract=extract):
+                self.cp.request_extract(lea_code=config['Calpads']['test_lea'],
+                                        extract_name=extract,
+                                        academic_year=config['Calpads']['current_academic_year'])
+                self.assertIsInstance(self.cp.download_extract(lea_code=config['Calpads']['test_lea'],
+                                                                extract_name=extract), 
+                                        pd.DataFrame)
     
     def test_download_extract_ssid_download(self):
-        self.cp.request_extract(lea_code=config['Calpads']['test_lea'],
-                                                extract_name='ssid')
-        self.cp.download_extract(config['Calpads']['test_lea'], 'ssid',
-                                temp_folder_name=config['Calpads']['temp_folder_path'])
-        self.assertTrue(len(os.listdir(config['Calpads']['temp_folder_path'])) == 1)
+        for extract in EXTRACTS:
+            with self.subTest(extract=extract):
+                self.cp.request_extract(lea_code=config['Calpads']['test_lea'],
+                                        extract_name=extract,
+                                        academic_year=config['Calpads']['current_academic_year'])
+                self.cp.download_extract(lea_code=config['Calpads']['test_lea'], 
+                                        extract_name=extract,
+                                        temp_folder_name=config['Calpads']['temp_folder_path'])
+                self.assertTrue(len(os.listdir(config['Calpads']['temp_folder_path'])) == 1)
