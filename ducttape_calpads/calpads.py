@@ -209,9 +209,10 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 self.driver.close()
                 return lang_data
     
-    def request_extract(self, lea_code, extract_name, active_students=None, academic_year=None, adjusted_enroll=None,
+    def request_extract(self, lea_code, extract_name, by_date_range=False, start_date=None, end_date=None,
+                        active_students=False, academic_year=None, adjusted_enroll=False,
                         active_staff=True, employment_start_date=None, employment_end_date=None, effective_start_date=None,
-                        effective_end_date=None, by_date_range=False, start_date=None, end_date=None):
+                        effective_end_date=None):
         """
         Request an extract with the extract_name from CALPADS.
         
@@ -219,31 +220,35 @@ class Calpads(WebUIDataSource, LoggingMixin):
         For the others, use their abbreviated acronym, e.g. SENR, SELA, etc.
         
         Args:
-        lea_code (str): string of the seven digit number found next to your LEA name in the org select menu. For most LEAs,\
-            this is the CD part of the County-District-School (CDS) code. For independently reporting charters, it's the S.
-        extract_name (str): For Direct Certification Extract, pass in extract_name='DirectCertification'. For SSID Request Extract, pass in 'SSID'.\
-            For the others, use their abbreviated acronym, e.g. SENR, SELA, etc. Spelling matters, capitalization does not.
-        active_students (bool): Optional. When using SPRG, True checks off Active Student in the form. When True, extract pulls only student programs \
-            with a NULL exit date for the program at the time of the request.
-        academic_year (str): String in the format YYYY-YYYY. Required only for some extracts.
-        adjusted_enroll (bool): Adjusted cumulative enrollment. When True, pulls students with enrollments dates that fall in the typical school year.\
-            When False, it pulls students with enrollments from July to June (7/1/YYYY - 6/30/YYYZ). Optional and used only for CENR.
-        active_staff (bool): Optional. For SDEM - only extract SDEM records of active staff. Default to True. If False, must provide employment\
-            date range.
-        employment_start_date (str): Optional. For SDEM - input used to filter Staff members from the extract. Suggested Format: MM/DD/YYYY.
-        employment_end_date (str): Optional. For SDEM - input used to filter Staff members from the extract. Suggested Format: MM/DD/YYYY.
-        effective_start_date (str): Optional. For SDEM, the effective start date of the SDEM record - input used to filter Staff members from\
-            the extract. Suggested Format: MM/DD/YYYY.
-        effective_end_date (str): Optional. For SDEM, the effective end date of the SDEM record - input used to filter Staff members from\
-            the extract. Suggested Format: MM/DD/YYYY.
-        temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. If this directory does not exist,\
-            it will be created. The parent directory will be the temp_folder_path used when setting up Calpads object. If None, a temporary directory\
-            will be created and deleted as part of cleanup.
-        max_attempts (int): the max number of times to try checking for the download. There's a 1 minute wait between each attempt.
-        pandas_read_csv_kwargs: additional arguments to pass to Pandas read_csv
+            lea_code (str): string of the seven digit number found next to your LEA name in the org select menu. For most LEAs,
+                this is the CD part of the County-District-School (CDS) code. For independently reporting charters, it's the S.
+            extract_name (str): generally the four letter acronym of the extract. e.g. SENR, SELA, etc.
+                For Direct Certification Extract, pass in extract_name='DirectCertification'. 
+                For SSID Request Extract, pass in 'SSID'.
+                Spelling matters, capitalization does not. Raises ReportNotFound if report name is unrecognized/not supported.
+            by_date_range (bool, optional): some extracts can be requested with a date range parameter. Set to True to use date range.
+                If True, start_date and end_date are required.
+            start_date (str, optional): when by_date_range is set to True, this is used as the start date parameter. Format: MM/DD/YYYY.
+            end_date (str, optional): when by_date_range is set to True, this is used as the end date parameter. Format: MM/DD/YYYY.
+            active_students (bool, optional): When requesting SPRG, True checks off Active Student in the form. 
+                When True, extract pulls only student programs with a NULL exit date for the program at the time of the request.
+                Defaults to False.
+            academic_year (str, optional): String in the format YYYY-YYZZ. E.g. 2019-2020. Required only for some extracts.
+            adjusted_enroll (bool, optional): Adjusted cumulative enrollment for CENR extract. 
+                When True, pulls students with enrollments dates that fall in the typical school year.
+                When False, it pulls students with enrollments from July to June (7/1/YYYY - 6/30/YYZZ). 
+                Defaults to False.
+            active_staff (bool, optional): For SDEM - only extract SDEM records of active staff. Default to True. If False, must provide employment
+                date range.
+            employment_start_date (str, optional): For SDEM - used to filter Staff members from the extract. Format: MM/DD/YYYY.
+            employment_end_date (str, optional): For SDEM - used to filter Staff members from the extract. Format: MM/DD/YYYY.
+            effective_start_date (str, optional): For SDEM, the effective start date of the SDEM record - used to filter Staff members from
+                the extract. Format: MM/DD/YYYY.
+            effective_end_date (str, optional): For SDEM, the effective end date of the SDEM record - used to filter Staff members from
+                the extract. Format: MM/DD/YYYY.
 
         Returns:
-        Boolean: True if extract request was successful
+            boolean: True if extract request was successful, False if it was not successful.
         """
         #already changed to appropriate LEA
         extract_name = extract_name.upper()
@@ -253,6 +258,10 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #Some validations of required Args
         if extract_name in academic_year_only_extracts:
             assert academic_year, "For {} Extract, academic_year is required. Format YYYY-YYYY".format(extract_name)
+        if by_date_range and extract_name != 'SDEM' and extract_name not in academic_year_only_extracts:
+            assert start_date and end_date, "If by_date_range is True, start_date and end_date are required."
+        if not active_staff and extract_name == 'SDEM':
+            assert employment_start_date and employment_end_date, "If not using active staff, employment start date and end date are required."
 
         #set up driver
         self.driver = DriverBuilder().get_driver(headless=self.headless)
@@ -591,15 +600,17 @@ class Calpads(WebUIDataSource, LoggingMixin):
         For the others, use their abbreviated acronym, e.g. SENR, SELA, etc.
         
         Args:
-        lea_code (str): string of the seven digit number found next to your LEA name in the org select menu. For most LEAs,\
-            this is the CD part of the County-District-School (CDS) code. For independently reporting charters, it's the S.
-        extract_name (str): For Direct Certification Extract, pass in extract_name='DirectCertification'. For SSID Request Extract, pass in 'SSID'.\
-            For the others, use their abbreviated acronym, e.g. SENR, SELA, etc. Spelling matters, capitalization does not.
-        temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. If this directory does not exist,\
-            it will be created. The parent directory will be the temp_folder_path used when setting up Calpads object. If None, a temporary directory\
-            will be created and deleted as part of cleanup.
-        max_attempts (int): the max number of times to try checking for the download. There's a 1 minute wait between each attempt.
-        pandas_read_csv_kwargs: additional arguments to pass to Pandas read_csv
+            lea_code (str): string of the seven digit number found next to your LEA name in the org select menu. For most LEAs,
+                this is the CD part of the County-District-School (CDS) code. For independently reporting charters, it's the S.
+            extract_name (str): generally the four letter acronym of the extract. e.g. SENR, SELA, etc.
+                For Direct Certification Extract, pass in extract_name='DirectCertification'. 
+                For SSID Request Extract, pass in 'SSID'.
+                Spelling matters, capitalization does not. Raises ReportNotFound if report name is unrecognized/not supported.
+            temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. If this directory does not exist,
+                it will be created. The parent directory will be the temp_folder_path used when setting up Calpads object. If None, a temporary directory
+                will be created and deleted as part of cleanup.
+            max_attempts (int): the max number of times to try checking for the download. There's a 1 minute wait between each attempt.
+            pandas_read_csv_kwargs: additional arguments to pass to Pandas read_csv
 
         Returns:
         DataFrame: A Pandas DataFrame of the extract
@@ -643,7 +654,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
             'SPED': 'Special Ed ODS Download',
             'SSRV': 'Student Services ODS Download' 
             }
-        
+        if not expected_extract_types.get(extract_name, None):
+            raise ReportNotFound("{} extract not found".format(extract_name))
         while attempt < max_attempts and not success:
             try:
                 WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[3]')))
