@@ -613,7 +613,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             pandas_read_csv_kwargs: additional arguments to pass to Pandas read_csv
 
         Returns:
-        DataFrame: A Pandas DataFrame of the extract
+            DataFrame: A Pandas DataFrame of the extract
         """
         extract_name = extract_name.upper()
 
