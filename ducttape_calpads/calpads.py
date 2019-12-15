@@ -309,15 +309,18 @@ class Calpads(WebUIDataSource, LoggingMixin):
             'SCSC': lambda: self.__fill_scsc_request_extract(academic_year),
             'SCSE': lambda: self.__fill_scse_request_extract(academic_year),
             'SDIS': lambda: self.__fill_sdis_request_extract(academic_year),
+            'SPED': lambda: self.__fill_sped_request_extract(by_date_range, start_date, end_date),
+            'SSRV': lambda: self.__fill_ssrv_request_extract(by_date_range, start_date, end_date)
         }
         #Call the handler
         form_handlers[extract_name]()
 
         #Click request button
-        if by_date_range and extract_name != 'SDEM' and extract_name not in academic_year_only_extracts:
-            req = self.driver.find_element_by_xpath("//div[contains(@id, 'DateRange')]//button[contains(text(), 'Request File')]")
-        else:
-            req = self.driver.find_element_by_xpath("//button[contains(text(), 'Request File')]")
+        reqs = self.driver.find_elements_by_xpath("//button[contains(text(), 'Request File')]")
+        for r in reqs:
+            #Some pages have multiple Request File buttons in the DOM depending on the options and permissions of the user
+            if r.is_displayed():
+                req = r
         req.click()
         try:
             WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.CLASS_NAME, 'alert-success')))
@@ -355,10 +358,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
         assert Select(self.driver.find_element_by_xpath(select_xpath)).options.__len__() == 0, "Failed to select all of the school options"
         #TODO: Confirm that we don't need to wait for anything here.
 
-    def _fill_typical_date_range_form(self, start_date, end_date):
+    def _fill_typical_date_range_form(self, start_date, end_date, extract_name=None):
         """Fills in the typical date range form"""
-        start_date_xpath = "//div[contains(@id, 'DateRange')]//input[contains(@id, 'StartDate')]"
-        end_date_xpath = "//div[contains(@id, 'DateRange')]//input[contains(@id, 'EndDate')]"
+        if not extract_name:
+            start_date_xpath = "//div[contains(@id, 'DateRange')]//input[contains(@id, 'StartDate')]"
+            end_date_xpath = "//div[contains(@id, 'DateRange')]//input[contains(@id, 'EndDate')]"
+        elif extract_name in ['SPED', 'SSRV']:
+            start_date_xpath = "//div[contains(@id,'NonSelpa')]//input[contains(@id, 'StartDate')]"
+            end_date_xpath = "//div[contains(@id,'NonSelpa')]//input[contains(@id, 'EndDate')]"
         try:
             WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.XPATH, start_date_xpath)))
         except TimeoutException:
@@ -568,6 +575,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #Defaulting to all grades TODO: Maybe support specific grades? Doubt it'd be useful.
         all_grades.select_by_visible_text('All')
 
+    def __fill_sped_request_extract(self, by_date_range, start_date, end_date):
+        if by_date_range:
+            self._fill_typical_date_range_form(start_date, end_date, extract_name='SPED')
+
+    def __fill_ssrv_request_extract(self, by_date_range, start_date, end_date):
+        if by_date_range:
+            self._fill_typical_date_range_form(start_date, end_date, extract_name='SSRV')
+
     def download_extract(self, lea_code, extract_name, temp_folder_name=None, max_attempts=10, pandas_read_csv_kwargs={}):
         """
         Request an extract with the extract_name from CALPADS.
@@ -624,7 +639,9 @@ class Calpads(WebUIDataSource, LoggingMixin):
             'CRSC': 'Course Section Completion ODS Download',
             'SCSE': 'Student Course Section Enrollment ODS Download',
             'SCSC': 'Student Course Section Completion ODS Download',
-            'SCTE': 'Student Career Technical Education ODS Download', 
+            'SCTE': 'Student Career Technical Education ODS Download',
+            'SPED': 'Special Ed ODS Download',
+            'SSRV': 'Student Services ODS Download' 
             }
         
         while attempt < max_attempts and not success:
