@@ -293,7 +293,9 @@ class Calpads(WebUIDataSource, LoggingMixin):
         if by_date_range and extract_name not in  ['SDEM', 'DIRECTCERTIFICATION'] and extract_name not in academic_year_only_extracts:
             self.driver.find_element_by_xpath("//*[contains(text(), 'Date Range')]").click()
         
-        if extract_name != 'SDEM':
+        if extract_name == 'DIRECTCERTIFICATION':
+            self.__move_all_for_extract_request(extract_name, academic_year_only_extracts, by_date_range=False)
+        elif extract_name != 'SDEM':
             self.__move_all_for_extract_request(extract_name, academic_year_only_extracts, by_date_range=by_date_range)
 
 
@@ -633,7 +635,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         attempt = 0
         success = False
         today_ymd = dt.datetime.now().strftime('%Y-%m-%d')
-        #TODO: Confirm these extract names
+        #TODO: Extract Type text changes often it seems. File Name split by underscore and get the first item in index might be more reliable?
         expected_extract_types = {
             'SENR': "SSID Enrollment ODS Download",
             'SINF': "Student Information ODS Download",
