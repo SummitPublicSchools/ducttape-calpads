@@ -155,11 +155,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 else:
                     #Passed the validations/checks, return the dataframe
                     self.log.info("Student {} does not appear to have any language data. Once confirmed, student should get tested.".format(ssid))
-                    self.driver.close()
+                    self.driver.quit()
                     return lang_data
             else:
                 self.log.info('Something unexpected happened when trying to load the SELA table for {}'.format(ssid))
-                self.driver.close() #TODO: Should the driver always close at this point?
+                self.driver.quit() #TODO: Should the driver always close at this point?
                 raise ReportNotFound #TODO: A more explicit/accurate error might be helpful
         
         #If the table body *is* found in the DOM, do the following:
@@ -181,11 +181,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
                             ssid, lang_data['Acquisition Code'][0], lang_data['Status Date'][0], lang_data['Primary Language Code'][0]
                             )
                         )
-                    self.driver.close()
+                    self.driver.quit()
                     return lang_data
                 else:
                     self.log.info('Student {} does not appear to have any language data. Once confirmed, student should get tested.'.format(ssid))
-                self.driver.close()
+                self.driver.quit()
                 return lang_data
         else: #Sometimes the wrong tab is clicked and the wrong table is indexed at 1. #TODO: Add a max_attempts to get it right feature - this issue seems dependent on loading issues
             try:
@@ -193,7 +193,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                                             'Correction Reason Code','Effective Start Date'])
             except AssertionError:
                 self.log.info('Found the wrong table again. Closing the driver.')
-                self.driver.close()
+                self.driver.quit()
                 raise ReportNotFound #TODO: A more explicit/accurate error might be helpful
             else:
                 if len(lang_data) != 0:
@@ -202,11 +202,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
                             ssid, lang_data['Acquisition Code'][0], lang_data['Status Date'][0], lang_data['Primary Language Code'][0]
                             )
                         )
-                    self.driver.close()
+                    self.driver.quit()
                     return lang_data
                 else:
                     self.log.info('Student {} does not appear to have any language data. Once confirmed, student should get tested.'.format(ssid))
-                self.driver.close()
+                self.driver.quit()
                 return lang_data
     
     def request_extract(self, lea_code, extract_name, by_date_range=False, start_date=None, end_date=None,
@@ -286,14 +286,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 WebDriverWait(self.driver, self.wait_time).until(EC.text_to_be_present_in_element((By.CLASS_NAME, 'btn-secondary'), 'Request File'))
         except TimeoutException:
             self.log.info("The requested extract, {}, is not a supported extract name.".format(extract_name))
-            self.driver.close()
+            self.driver.quit()
             raise ReportNotFound
         
         #Select the schools (generally move all) TODO: Consider supporting selective school selection
         if by_date_range and extract_name not in  ['SDEM', 'DIRECTCERTIFICATION'] and extract_name not in academic_year_only_extracts:
             self.driver.find_element_by_xpath("//*[contains(text(), 'Date Range')]").click()
         
-        if extract_name in ['SDEM', 'DIRECTCERTIFICATION']:
+        if extract_name != 'SDEM':
             self.__move_all_for_extract_request(extract_name, academic_year_only_extracts, by_date_range=by_date_range)
 
 
@@ -335,12 +335,12 @@ class Calpads(WebUIDataSource, LoggingMixin):
             WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.CLASS_NAME, 'alert-success')))
         except TimeoutException:
             self.log.info("The extract request was unsuccessful.")
-            self.driver.close()
+            self.driver.quit()
             return False
         
         self.log.info("{} {} Extract Request made successfully. Please check back later for download".format(lea_code, extract_name))
         self.driver.get("https://www.calpads.org")
-        self.driver.close()
+        self.driver.quit()
 
         return True
 
@@ -379,7 +379,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.XPATH, start_date_xpath)))
         except TimeoutException:
             self.log.info("The extract request was unsuccessful.")
-            self.driver.close()
+            self.driver.quit()
             return False
         self.driver.find_element_by_xpath(start_date_xpath).send_keys(start_date)
         self.driver.find_element_by_xpath(end_date_xpath).send_keys(end_date)
@@ -456,7 +456,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.ID, 'EnrollmentStartDate')))
             except TimeoutException:
                 self.log.info("The extract request was unsuccessful.")
-                self.driver.close()
+                self.driver.quit()
                 return False
             
             if active_students:
@@ -621,7 +621,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             extract_download_folder_path = self.temp_folder_path + '/' + temp_folder_name
             os.makedirs(extract_download_folder_path, exist_ok=True)
         else:
-            extract_download_folder_path = mkdtemp(dir=self.temp_folder_path)
+            extract_download_folder_path = mkdtemp()
 
         self.driver = DriverBuilder().get_driver(download_location=extract_download_folder_path, headless=self.headless)
         self._login()
@@ -681,7 +681,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.ID, 'org-select')))
         
         if not success:
-            self.driver.close()
+            self.driver.quit()
             self.log.info("All download attempts failed for {}. Cancelling {} extract download. Make sure you've requested the extract today.".format(lea_code, extract_name))
             raise ReportNotFound
         
@@ -692,7 +692,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             kwargs_copy['names'] = EXTRACT_COLUMNS[extract_name]
         extract_df = pd.read_csv(get_most_recent_file_in_dir(extract_download_folder_path), sep='^', header=None, **kwargs_copy)
         self.log.info("{} {} Extract downloaded.".format(lea_code, extract_name))
-        self.driver.close()
+        self.driver.quit()
 
         #Download won't have an easily recognizable name. Rename.
         #TODO: Unless one memorizes the LEA codes, should consider optionally supporting a text substitution of the lea_code via a dictionary.
@@ -822,7 +822,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 report_df = None
             #TODO: Denote Snapshot vs. ODS download in logging
             self.log.info("{} {} downloaded.".format(lea_code, report_code))
-            self.driver.close()
+            self.driver.quit()
 
             #Download won't have an easily recognizable name. Rename.
             #TODO: Unless one memorizes the LEA codes, should consider optionally supporting a text substitution of the lea_code via a dictionary.
@@ -861,7 +861,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             report_download_folder_path = self.temp_folder_path + '/' + temp_folder_name
             os.makedirs(report_download_folder_path, exist_ok=True)
         else:
-            report_download_folder_path = mkdtemp(dir=self.temp_folder_path)
+            report_download_folder_path = mkdtemp()
 
         self.driver = DriverBuilder().get_driver(download_location=report_download_folder_path, headless=self.headless)
         self._login()
