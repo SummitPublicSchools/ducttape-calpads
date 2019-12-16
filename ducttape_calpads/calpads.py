@@ -10,7 +10,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import (
+    TimeoutException,
+    NoSuchElementException,
+    ElementNotVisibleException
+)
 from ducttape.webui_datasource import WebUIDataSource
 from ducttape.exceptions import ReportNotFound, ReportNotReady, RequestError
 from ducttape.utils import (
@@ -151,11 +155,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 else:
                     #Passed the validations/checks, return the dataframe
                     self.log.info("Student {} does not appear to have any language data. Once confirmed, student should get tested.".format(ssid))
-                    self.driver.close()
+                    self.driver.quit()
                     return lang_data
             else:
                 self.log.info('Something unexpected happened when trying to load the SELA table for {}'.format(ssid))
-                self.driver.close() #TODO: Should the driver always close at this point?
+                self.driver.quit() #TODO: Should the driver always close at this point?
                 raise ReportNotFound #TODO: A more explicit/accurate error might be helpful
         
         #If the table body *is* found in the DOM, do the following:
@@ -177,11 +181,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
                             ssid, lang_data['Acquisition Code'][0], lang_data['Status Date'][0], lang_data['Primary Language Code'][0]
                             )
                         )
-                    self.driver.close()
+                    self.driver.quit()
                     return lang_data
                 else:
                     self.log.info('Student {} does not appear to have any language data. Once confirmed, student should get tested.'.format(ssid))
-                self.driver.close()
+                self.driver.quit()
                 return lang_data
         else: #Sometimes the wrong tab is clicked and the wrong table is indexed at 1. #TODO: Add a max_attempts to get it right feature - this issue seems dependent on loading issues
             try:
@@ -189,7 +193,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                                             'Correction Reason Code','Effective Start Date'])
             except AssertionError:
                 self.log.info('Found the wrong table again. Closing the driver.')
-                self.driver.close()
+                self.driver.quit()
                 raise ReportNotFound #TODO: A more explicit/accurate error might be helpful
             else:
                 if len(lang_data) != 0:
@@ -198,14 +202,15 @@ class Calpads(WebUIDataSource, LoggingMixin):
                             ssid, lang_data['Acquisition Code'][0], lang_data['Status Date'][0], lang_data['Primary Language Code'][0]
                             )
                         )
-                    self.driver.close()
+                    self.driver.quit()
                     return lang_data
                 else:
                     self.log.info('Student {} does not appear to have any language data. Once confirmed, student should get tested.'.format(ssid))
-                self.driver.close()
+                self.driver.quit()
                 return lang_data
     
-    def request_extract(self, lea_code, extract_name, active_students=None, academic_year=None, adjusted_enroll=None,
+    def request_extract(self, lea_code, extract_name, by_date_range=False, start_date=None, end_date=None,
+                        active_students=False, academic_year=None, adjusted_enroll=False,
                         active_staff=True, employment_start_date=None, employment_end_date=None, effective_start_date=None,
                         effective_end_date=None):
         """
@@ -215,38 +220,48 @@ class Calpads(WebUIDataSource, LoggingMixin):
         For the others, use their abbreviated acronym, e.g. SENR, SELA, etc.
         
         Args:
-        lea_code (str): string of the seven digit number found next to your LEA name in the org select menu. For most LEAs,\
-            this is the CD part of the County-District-School (CDS) code. For independently reporting charters, it's the S.
-        extract_name (str): For Direct Certification Extract, pass in extract_name='DirectCertification'. For SSID Request Extract, pass in 'SSID'.\
-            For the others, use their abbreviated acronym, e.g. SENR, SELA, etc. Spelling matters, capitalization does not.
-        active_students (bool): Optional. When using SPRG, True checks off Active Student in the form. When True, extract pulls only student programs \
-            with a NULL exit date for the program at the time of the request.
-        academic_year (str): String in the format YYYY-YYYY. Required only for some extracts.
-        adjusted_enroll (bool): Adjusted cumulative enrollment. When True, pulls students with enrollments dates that fall in the typical school year.\
-            When False, it pulls students with enrollments from July to June (7/1/YYYY - 6/30/YYYZ). Optional and used only for CENR.
-        active_staff (bool): Optional. For SDEM - only extract SDEM records of active staff. Default to True. If False, must provide employment\
-            date range.
-        employment_start_date (str): Optional. For SDEM - input used to filter Staff members from the extract. Suggested Format: MM/DD/YYYY.
-        employment_end_date (str): Optional. For SDEM - input used to filter Staff members from the extract. Suggested Format: MM/DD/YYYY.
-        effective_start_date (str): Optional. For SDEM, the effective start date of the SDEM record - input used to filter Staff members from\
-            the extract. Suggested Format: MM/DD/YYYY.
-        effective_end_date (str): Optional. For SDEM, the effective end date of the SDEM record - input used to filter Staff members from\
-            the extract. Suggested Format: MM/DD/YYYY.
-        temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. If this directory does not exist,\
-            it will be created. The parent directory will be the temp_folder_path used when setting up Calpads object. If None, a temporary directory\
-            will be created and deleted as part of cleanup.
-        max_attempts (int): the max number of times to try checking for the download. There's a 1 minute wait between each attempt.
-        pandas_read_csv_kwargs: additional arguments to pass to Pandas read_csv
+            lea_code (str): string of the seven digit number found next to your LEA name in the org select menu. For most LEAs,
+                this is the CD part of the County-District-School (CDS) code. For independently reporting charters, it's the S.
+            extract_name (str): generally the four letter acronym of the extract. e.g. SENR, SELA, etc.
+                For Direct Certification Extract, pass in extract_name='DirectCertification'. 
+                For SSID Request Extract, pass in 'SSID'.
+                Spelling matters, capitalization does not. Raises ReportNotFound if report name is unrecognized/not supported.
+            by_date_range (bool, optional): some extracts can be requested with a date range parameter. Set to True to use date range.
+                If True, start_date and end_date are required.
+            start_date (str, optional): when by_date_range is set to True, this is used as the start date parameter. Format: MM/DD/YYYY.
+            end_date (str, optional): when by_date_range is set to True, this is used as the end date parameter. Format: MM/DD/YYYY.
+            active_students (bool, optional): When requesting SPRG, True checks off Active Student in the form. 
+                When True, extract pulls only student programs with a NULL exit date for the program at the time of the request.
+                Defaults to False.
+            academic_year (str, optional): String in the format YYYY-YYZZ. E.g. 2019-2020. Required only for some extracts.
+            adjusted_enroll (bool, optional): Adjusted cumulative enrollment for CENR extract. 
+                When True, pulls students with enrollments dates that fall in the typical school year.
+                When False, it pulls students with enrollments from July to June (7/1/YYYY - 6/30/YYZZ). 
+                Defaults to False.
+            active_staff (bool, optional): For SDEM - only extract SDEM records of active staff. Default to True. If False, must provide employment
+                date range.
+            employment_start_date (str, optional): For SDEM - used to filter Staff members from the extract. Format: MM/DD/YYYY.
+            employment_end_date (str, optional): For SDEM - used to filter Staff members from the extract. Format: MM/DD/YYYY.
+            effective_start_date (str, optional): For SDEM, the effective start date of the SDEM record - used to filter Staff members from
+                the extract. Format: MM/DD/YYYY.
+            effective_end_date (str, optional): For SDEM, the effective end date of the SDEM record - used to filter Staff members from
+                the extract. Format: MM/DD/YYYY.
 
         Returns:
-        Boolean: True if extract request was successful
+            boolean: True if extract request was successful, False if it was not successful.
         """
         #already changed to appropriate LEA
         extract_name = extract_name.upper()
+        academic_year_only_extracts = ['CRSC', 'CRSE', 'SASS', 'SCSC', 'STAS',
+                                        'SCTE', 'SCSE', 'SDIS']
 
         #Some validations of required Args
-        if extract_name in ['CENR', 'SCSC']:
+        if extract_name in academic_year_only_extracts or (extract_name == 'CENR' and not by_date_range):
             assert academic_year, "For {} Extract, academic_year is required. Format YYYY-YYYY".format(extract_name)
+        if by_date_range and extract_name != 'SDEM' and extract_name not in academic_year_only_extracts:
+            assert start_date and end_date, "If by_date_range is True, start_date and end_date are required."
+        if not active_staff and extract_name == 'SDEM':
+            assert employment_start_date and employment_end_date, "If not using active staff, employment start date and end date are required."
 
         #set up driver
         self.driver = DriverBuilder().get_driver(headless=self.headless)
@@ -271,22 +286,30 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 WebDriverWait(self.driver, self.wait_time).until(EC.text_to_be_present_in_element((By.CLASS_NAME, 'btn-secondary'), 'Request File'))
         except TimeoutException:
             self.log.info("The requested extract, {}, is not a supported extract name.".format(extract_name))
-            self.driver.close()
+            self.driver.quit()
             raise ReportNotFound
         
         #Select the schools (generally move all) TODO: Consider supporting selective school selection
-        if extract_name != 'SDEM':
-            self.__move_all_for_extract_request()
+        if by_date_range and extract_name not in  ['SDEM', 'DIRECTCERTIFICATION'] and extract_name not in academic_year_only_extracts:
+            self.driver.find_element_by_xpath("//*[contains(text(), 'Date Range')]").click()
+        
+        if extract_name == 'DIRECTCERTIFICATION':
+            self.__move_all_for_extract_request(extract_name, academic_year_only_extracts, by_date_range=False)
+        elif extract_name != 'SDEM':
+            self.__move_all_for_extract_request(extract_name, academic_year_only_extracts, by_date_range=by_date_range)
+
 
         #Need specific method handlers for the extracts. Dispatch to form handlers
         form_handlers = {
-            'SSID': lambda: self.__fill_ssid_request_extract(lea_code),
+            'SSID': lambda: self.__fill_ssid_request_extract(lea_code, academic_year_only_extracts,
+                                                            by_date_range, start_date, end_date),
             'DIRECTCERTIFICATION': lambda: self.__fill_dc_request_extract(),
-            'SENR': lambda: self.__fill_senr_request_extract(),
-            'SELA': lambda: self.__fill_sela_request_extract(),
-            'SPRG': lambda: self.__fill_sprg_request_extract(active_students),
-            'CENR': lambda: self.__fill_cenr_request_extract(academic_year, adjusted_enroll),
-            'SINF': lambda: self.__fill_sinf_request_extract(),
+            'SENR': lambda: self.__fill_senr_request_extract(by_date_range,start_date,end_date),
+            'SELA': lambda: self.__fill_sela_request_extract(by_date_range, start_date, end_date),
+            'SPRG': lambda: self.__fill_sprg_request_extract(active_students, by_date_range, start_date, end_date),
+            'CENR': lambda: self.__fill_cenr_request_extract(academic_year, adjusted_enroll, by_date_range,
+                                                            start_date, end_date),
+            'SINF': lambda: self.__fill_sinf_request_extract(by_date_range, start_date, end_date),
             'CRSC': lambda: self.__fill_crsc_request_extract(academic_year),
             'CRSE': lambda: self.__fill_crse_request_extract(academic_year),
             'SASS': lambda: self.__fill_sass_request_extract(academic_year),
@@ -297,47 +320,73 @@ class Calpads(WebUIDataSource, LoggingMixin):
             'SCSC': lambda: self.__fill_scsc_request_extract(academic_year),
             'SCSE': lambda: self.__fill_scse_request_extract(academic_year),
             'SDIS': lambda: self.__fill_sdis_request_extract(academic_year),
+            'SPED': lambda: self.__fill_sped_request_extract(by_date_range, start_date, end_date),
+            'SSRV': lambda: self.__fill_ssrv_request_extract(by_date_range, start_date, end_date)
         }
         #Call the handler
         form_handlers[extract_name]()
 
         #Click request button
-        if extract_name != 'SPRG':
-            req = self.driver.find_element_by_class_name('btn-primary')
-        else:
-            #Currently, SPRG page has a btn-secondary class.
-            req = self.driver.find_element_by_class_name('btn-secondary')
+        reqs = self.driver.find_elements_by_xpath("//button[contains(text(), 'Request File')]")
+        for r in reqs:
+            #Some pages have multiple Request File buttons in the DOM depending on the options and permissions of the user
+            if r.is_displayed():
+                req = r
         req.click()
         try:
             WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.CLASS_NAME, 'alert-success')))
         except TimeoutException:
             self.log.info("The extract request was unsuccessful.")
-            self.driver.close()
+            self.driver.quit()
             return False
         
         self.log.info("{} {} Extract Request made successfully. Please check back later for download".format(lea_code, extract_name))
         self.driver.get("https://www.calpads.org")
-        self.driver.close()
+        self.driver.quit()
 
         return True
 
-    def __move_all_for_extract_request(self):
+    def __move_all_for_extract_request(self, extract_name, year_only_list, by_date_range=False):
         """Refactored method to click move all in request extract forms"""
         #Defaults to the first moveall button which is generally what we want. TODO: Consider supporting other extract request methods. e.g. date range, etc.
-        #moveall = self.driver.find_elements_by_class_name('moveall')[0]
         time.sleep(2) #TODO: Don't think there's something explicit to wait for here, the execution seems to be going too fast causes errors on SCSC
-        select = Select(self.driver.find_element_by_id('bootstrap-duallistbox-nonselected-list_School'))
+        if by_date_range and extract_name not in year_only_list:
+            select_xpath = "//div[contains(@id, 'DateRange')]//select[@id='bootstrap-duallistbox-nonselected-list_School']"
+        else:
+            select_xpath = "//*[@id='bootstrap-duallistbox-nonselected-list_School']"
+        select = Select(self.driver.find_element_by_xpath(select_xpath)) #TODO: GENERALIZE FOR ALL EXTRACTS
         static_options = len(select.options)
         n = 0
         #Going to click moveall multiple times, but I think the time.sleep() above actually solves the need for this.
         while n < static_options:
-            moveall = self.driver.find_elements_by_class_name('moveall')[0]
-            moveall.click()
+            if by_date_range and extract_name not in year_only_list: #For when you are using DateRange #TODO: Confirm behavior for all extracts.
+                moveall = self.driver.find_elements_by_xpath("//div[contains(@id, 'DateRange')]//button[contains(@title, 'Move all')]")[-1]
+                moveall.click()
+            else: 
+                moveall = self.driver.find_elements_by_class_name('moveall')[0]
+                moveall.click()
             n += 1
-        assert Select(self.driver.find_element_by_id('bootstrap-duallistbox-nonselected-list_School')).options.__len__() == 0, "Failed to select all of the school options"
+        assert Select(self.driver.find_element_by_xpath(select_xpath)).options.__len__() == 0, "Failed to select all of the school options"
         #TODO: Confirm that we don't need to wait for anything here.
 
-    def __fill_ssid_request_extract(self, lea_code):
+    def _fill_typical_date_range_form(self, start_date, end_date, extract_name=None):
+        """Fills in the typical date range form"""
+        if not extract_name:
+            start_date_xpath = "//div[contains(@id, 'DateRange')]//input[contains(@id, 'StartDate')]"
+            end_date_xpath = "//div[contains(@id, 'DateRange')]//input[contains(@id, 'EndDate')]"
+        elif extract_name in ['SPED', 'SSRV']:
+            start_date_xpath = "//div[contains(@id,'NonSelpa')]//input[contains(@id, 'StartDate')]"
+            end_date_xpath = "//div[contains(@id,'NonSelpa')]//input[contains(@id, 'EndDate')]"
+        try:
+            WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.XPATH, start_date_xpath)))
+        except TimeoutException:
+            self.log.info("The extract request was unsuccessful.")
+            self.driver.quit()
+            return False
+        self.driver.find_element_by_xpath(start_date_xpath).send_keys(start_date)
+        self.driver.find_element_by_xpath(end_date_xpath).send_keys(end_date)
+
+    def __fill_ssid_request_extract(self, lea_code, year_only_list, by_date_range, start_date, end_date):
         """Messiest extract request handler. Assumes that a recent SENR file has been fully Posted for the SSID extract to be current."""
         #We're going back to FileSubmission because we need the job ID for the latest file upload.
         self.driver.get('https://www.calpads.org/FileSubmission')
@@ -356,15 +405,26 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #navigate to extract page
         self.driver.get('https://www.calpads.org/Extract/SSIDExtract')
 
+        if not by_date_range:
+            jobid_option_xpath = '//*[@id="SelectedJobIDssidExtractbyJob"]/option'
+            select_id = 'SelectedJobIDssidExtractbyJob'
+            grade_level_xpath = '//*[@id="GradeLevel"]'
+        else:
+            self.driver.find_element_by_xpath("//*[contains(text(), 'Date Range')]").click()
+            jobid_option_xpath = '//*[@id="SelectedJobIDssidExtractbyDate"]/option'
+            select_id = 'SelectedJobIDssidExtractbyDate'
+            grade_level_xpath = '//div[@id="DateRange"]//select[@id="GradeLevel"]'
+            self._fill_typical_date_range_form(start_date, end_date)
+
         try:
             #TODO: More dynamic jobid selection? Or always assume the latest upload/import?
-            jobid_option = WebDriverWait(self.driver, self.wait_time).until(EC.element_located_selection_state_to_be((By.XPATH,'//*[@id="SelectedJobIDssidExtractbyJob"]/option'), True))
+            jobid_option = WebDriverWait(self.driver, self.wait_time).until(EC.element_located_selection_state_to_be((By.XPATH,jobid_option_xpath), True))
         except TimeoutException:
             self.log.info('Job ID failed to automatically populate for SSID Extract for {}. Did you post the file you uploaded yet?'.format(lea_code))
             raise ReportNotReady
         else:
-            WebDriverWait(self.driver, self.wait_time).until(EC.element_located_selection_state_to_be((By.XPATH,'//*[@id="SelectedJobIDssidExtractbyJob"]/option'), True))
-            select = Select(self.driver.find_element_by_id('SelectedJobIDssidExtractbyJob'))
+            WebDriverWait(self.driver, self.wait_time).until(EC.element_located_selection_state_to_be((By.XPATH,jobid_option_xpath), True))
+            select = Select(self.driver.find_element_by_id(select_id))
             #Find the element that's been pre-selected
         for opt in select.all_selected_options: #TODO: this returned stale element once for some reason...
             self.driver.execute_script("arguments[0].removeAttribute('selected')", opt)
@@ -375,24 +435,43 @@ class Calpads(WebUIDataSource, LoggingMixin):
             else:
                 continue
         
-        self.__move_all_for_extract_request()
+        self.__move_all_for_extract_request('SSID', year_only_list, by_date_range)
         #Defaulting to all grades TODO: Maybe support specific grades? Doubt it'd be useful.
-        all_grades = Select(self.driver.find_element_by_id('GradeLevel'))
+        all_grades = Select(self.driver.find_element_by_xpath(grade_level_xpath))
         all_grades.select_by_visible_text('All')
         
-    def __fill_sprg_request_extract(self, active_students):
+    def __fill_sprg_request_extract(self, active_students, by_date_range, start_date, end_date):
         """Handler for SPRG Extract Request form. Mostly just for selecting all programs in the required field.
         Args:
         active_students (bool): when True, extract only pulls students without an exit date in the program. i.e. have NULL exit dates.
         """
         #Check off Active Students
-        if active_students:
-            elem = self.driver.find_element_by_id('ActiveStudentsprgAcdmcYear')
-            elem.click()
-            #TODO: Confirm no need to wait
-        
+        if not by_date_range:
+            if active_students:
+                elem = self.driver.find_element_by_id('ActiveStudentsprgAcdmcYear')
+                elem.click()
+                #TODO: Confirm no need to wait
+            
+            select = Select(self.driver.find_element_by_id('EducationProgramCodesprgAcdmcYear'))
+        else:
+            try:
+                WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.ID, 'EnrollmentStartDate')))
+            except TimeoutException:
+                self.log.info("The extract request was unsuccessful.")
+                self.driver.quit()
+                return False
+            
+            if active_students:
+                elem = self.driver.find_element_by_id('ActiveStudentsprgDateRange')
+                elem.click()
+                #TODO: Confirm no need to wait
+            
+            self.driver.find_element_by_id("EnrollmentStartDate").send_keys(start_date)
+            self.driver.find_element_by_id("EnrollmentEndDate").send_keys(end_date)
+            
+            select = Select(self.driver.find_element_by_id('EducationProgramCodesprgDateRange'))
+
         #Select programs - defaulting to All TODO: Support specific programs.
-        select = Select(self.driver.find_element_by_id('EducationProgramCodesprgAcdmcYear'))
         select.select_by_value("All")
         #TODO: Confirm no need to wait
 
@@ -400,18 +479,21 @@ class Calpads(WebUIDataSource, LoggingMixin):
         """Handler for Direct Certification Extract request form. Currently only supports default values at loading."""
         pass
     
-    def __fill_sinf_request_extract(self):
+    def __fill_sinf_request_extract(self, by_date_range, start_date, end_date):
         """Handler for SINF Extract request form. Currently only supports default values at loading."""
-        pass
+        if by_date_range:
+            self._fill_typical_date_range_form(start_date, end_date)
     
-    def __fill_sela_request_extract(self):
+    def __fill_sela_request_extract(self, by_date_range, start_date, end_date):
         """Handler for SELA Extract request form. Currently only supports default values at loading."""
-        pass
+        if by_date_range:
+            self._fill_typical_date_range_form(start_date, end_date)
     
-    def __fill_senr_request_extract(self):
+    def __fill_senr_request_extract(self, by_date_range,start_date,end_date):
         """Handler for SENR Extract request form. Currently only supports default values at loading."""
-        pass
-    
+        if by_date_range:
+            self._fill_typical_date_range_form(start_date, end_date)
+
     def __fill_crsc_request_extract(self, academic_year):
         """Handler for CRSC Extract request form."""
         if academic_year:
@@ -484,21 +566,33 @@ class Calpads(WebUIDataSource, LoggingMixin):
         if effective_end_date:
             self.driver.find_element_by_id('EffectiveEndDate').send_keys(effective_end_date)
 
-    def __fill_cenr_request_extract(self, academic_year, adjusted_enroll):
+    def __fill_cenr_request_extract(self, academic_year, adjusted_enroll, by_date_range, start_date, end_date):
         """Handler for CENR Extract request form.
         Args:
-        adjusted_enroll (bool): Adjusted cumulative enrollment. When True, pulls students with enrollments dates that fall in the typical school year.\
-            When False, it pulls students with enrollments from July to June (7/1/YYYY - 6/30/YYYZ)
-        academic_year (str): a string in the format, YYYY-YYYY, e.g. 2018-2019.
+            adjusted_enroll (bool): Adjusted cumulative enrollment. When True, pulls students with enrollments dates that fall in the typical school year.
+                When False, it pulls students with enrollments from July to June (7/1/YYYY - 6/30/YYYZ)
+            academic_year (str): a string in the format, YYYY-YYYY, e.g. 2018-2019.
         """
+        if not by_date_range:
+            #Academic year
+            year = self.driver.find_element_by_name('AcademicYear_input')
+            year.clear()
+            year.send_keys(academic_year)
+            all_grades = Select(self.driver.find_element_by_id('GradeLevel'))
+        else:
+            self._fill_typical_date_range_form(start_date, end_date)
+            all_grades = Select(self.driver.find_element_by_xpath("//div[contains(@id, 'DateRange')]//select[@id='GradeLevel']"))
+
         #Defaulting to all grades TODO: Maybe support specific grades? Doubt it'd be useful.
-        all_grades = Select(self.driver.find_element_by_id('GradeLevel'))
         all_grades.select_by_visible_text('All')
 
-        #Academic year
-        year = self.driver.find_element_by_name('AcademicYear_input')
-        year.clear()
-        year.send_keys(academic_year)
+    def __fill_sped_request_extract(self, by_date_range, start_date, end_date):
+        if by_date_range:
+            self._fill_typical_date_range_form(start_date, end_date, extract_name='SPED')
+
+    def __fill_ssrv_request_extract(self, by_date_range, start_date, end_date):
+        if by_date_range:
+            self._fill_typical_date_range_form(start_date, end_date, extract_name='SSRV')
 
     def download_extract(self, lea_code, extract_name, temp_folder_name=None, max_attempts=10, pandas_read_csv_kwargs={}):
         """
@@ -508,18 +602,20 @@ class Calpads(WebUIDataSource, LoggingMixin):
         For the others, use their abbreviated acronym, e.g. SENR, SELA, etc.
         
         Args:
-        lea_code (str): string of the seven digit number found next to your LEA name in the org select menu. For most LEAs,\
-            this is the CD part of the County-District-School (CDS) code. For independently reporting charters, it's the S.
-        extract_name (str): For Direct Certification Extract, pass in extract_name='DirectCertification'. For SSID Request Extract, pass in 'SSID'.\
-            For the others, use their abbreviated acronym, e.g. SENR, SELA, etc. Spelling matters, capitalization does not.
-        temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. If this directory does not exist,\
-            it will be created. The parent directory will be the temp_folder_path used when setting up Calpads object. If None, a temporary directory\
-            will be created and deleted as part of cleanup.
-        max_attempts (int): the max number of times to try checking for the download. There's a 1 minute wait between each attempt.
-        pandas_read_csv_kwargs: additional arguments to pass to Pandas read_csv
+            lea_code (str): string of the seven digit number found next to your LEA name in the org select menu. For most LEAs,
+                this is the CD part of the County-District-School (CDS) code. For independently reporting charters, it's the S.
+            extract_name (str): generally the four letter acronym of the extract. e.g. SENR, SELA, etc.
+                For Direct Certification Extract, pass in extract_name='DirectCertification'. 
+                For SSID Request Extract, pass in 'SSID'.
+                Spelling matters, capitalization does not. Raises ReportNotFound if report name is unrecognized/not supported.
+            temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. If this directory does not exist,
+                it will be created. The parent directory will be the temp_folder_path used when setting up Calpads object. If None, a temporary directory
+                will be created and deleted as part of cleanup.
+            max_attempts (int): the max number of times to try checking for the download. There's a 1 minute wait between each attempt.
+            pandas_read_csv_kwargs: additional arguments to pass to Pandas read_csv
 
         Returns:
-        DataFrame: A Pandas DataFrame of the extract
+            DataFrame: A Pandas DataFrame of the extract
         """
         extract_name = extract_name.upper()
 
@@ -527,7 +623,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             extract_download_folder_path = self.temp_folder_path + '/' + temp_folder_name
             os.makedirs(extract_download_folder_path, exist_ok=True)
         else:
-            extract_download_folder_path = mkdtemp(dir=self.temp_folder_path)
+            extract_download_folder_path = mkdtemp()
 
         self.driver = DriverBuilder().get_driver(download_location=extract_download_folder_path, headless=self.headless)
         self._login()
@@ -539,7 +635,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         attempt = 0
         success = False
         today_ymd = dt.datetime.now().strftime('%Y-%m-%d')
-        #TODO: Confirm these extract names
+        #TODO: Extract Type text changes often it seems. File Name split by underscore and get the first item in index might be more reliable?
         expected_extract_types = {
             'SENR': "SSID Enrollment ODS Download",
             'SINF': "Student Information ODS Download",
@@ -550,15 +646,18 @@ class Calpads(WebUIDataSource, LoggingMixin):
             'CENR': 'Cumulative Enrollment ODS Download',
             'SASS': 'Staff Assignment ODS Download',
             'SDEM': 'Staff Demographics ODS Download',
-            'STAS': 'Student Absence Summary ODS Download',
+            'STAS': 'Student Absence ODS Download',
             'SDIS': 'Student Discipline ODS Download',
             'CRSE': 'Course Section Enrollment ODS Download',
             'CRSC': 'Course Section Completion ODS Download',
             'SCSE': 'Student Course Section Enrollment ODS Download',
             'SCSC': 'Student Course Section Completion ODS Download',
-            'SCTE': 'Student Career Technical Education ODS Download', 
+            'SCTE': 'Student Career Technical Education ODS Download',
+            'SPED': 'Special Ed ODS Download',
+            'SSRV': 'Student Services ODS Download' 
             }
-        
+        if not expected_extract_types.get(extract_name, None):
+            raise ReportNotFound("{} extract not found".format(extract_name))
         while attempt < max_attempts and not success:
             try:
                 WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[3]')))
@@ -584,7 +683,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.ID, 'org-select')))
         
         if not success:
-            self.driver.close()
+            self.driver.quit()
             self.log.info("All download attempts failed for {}. Cancelling {} extract download. Make sure you've requested the extract today.".format(lea_code, extract_name))
             raise ReportNotFound
         
@@ -595,7 +694,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             kwargs_copy['names'] = EXTRACT_COLUMNS[extract_name]
         extract_df = pd.read_csv(get_most_recent_file_in_dir(extract_download_folder_path), sep='^', header=None, **kwargs_copy)
         self.log.info("{} {} Extract downloaded.".format(lea_code, extract_name))
-        self.driver.close()
+        self.driver.quit()
 
         #Download won't have an easily recognizable name. Rename.
         #TODO: Unless one memorizes the LEA codes, should consider optionally supporting a text substitution of the lea_code via a dictionary.
@@ -725,7 +824,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 report_df = None
             #TODO: Denote Snapshot vs. ODS download in logging
             self.log.info("{} {} downloaded.".format(lea_code, report_code))
-            self.driver.close()
+            self.driver.quit()
 
             #Download won't have an easily recognizable name. Rename.
             #TODO: Unless one memorizes the LEA codes, should consider optionally supporting a text substitution of the lea_code via a dictionary.
@@ -736,7 +835,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             return False
     
     def download_snapshot_report(self, lea_code, report_code, snapshot_status='Certified', 
-                                dl_type='csv', max_attempts=10, temp_folder_name=None):
+                                academic_year='2019-2020', dl_type='csv', max_attempts=10, temp_folder_name=None):
         """Download a CALPADS snapshot report in a specified format. 
         
         Args:
@@ -764,7 +863,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             report_download_folder_path = self.temp_folder_path + '/' + temp_folder_name
             os.makedirs(report_download_folder_path, exist_ok=True)
         else:
-            report_download_folder_path = mkdtemp(dir=self.temp_folder_path)
+            report_download_folder_path = mkdtemp()
 
         self.driver = DriverBuilder().get_driver(download_location=report_download_folder_path, headless=self.headless)
         self._login()
