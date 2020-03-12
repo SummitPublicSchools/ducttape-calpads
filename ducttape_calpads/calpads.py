@@ -705,8 +705,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
 
         return extract_df
 
-    def __get_report_link(self, report_code):   
-        if report_code == '8.1eoy3':
+    def __get_report_link(self, report_code, is_snapshot=True):   
+        if report_code == '8.1eoy3' and is_snapshot:
             #TODO: Might add another variable and if-condition to re-use for ODS as well as Snapshot
             return 'https://www.calpads.org/Report/Snapshot/8_1_StudentProfileList_EOY3_'
         else:
@@ -905,6 +905,113 @@ class Calpads(WebUIDataSource, LoggingMixin):
             shutil.rmtree(report_download_folder_path)
         #TODO: result = None when the option is PDF which might be confusing/unexpected for users. Not sure what a better alternative would be.
         return result
+    
+    def _parse_ods_form(self, params_dict, dry_run, **kwargs):
+        """Parse and when it's not a dry run, fill in the form."""
+
+        for k, v in params_dict.items():
+            if v[0][0] == 'select':
+                select = Select(self.driver.find_element_by_xpath("//*[@data-parametername='{}']//select".format(k)))
+                v.append(('select', tuple(i.text for i in select.options)))
+                #If provided_args is not None and not dry_run -- do stuff for selects only; use dict.get(key) check
+                if kwargs and not dry_run:
+                    for a, b in kwargs.items():
+                        if params_dict.get(a): #ensure the key is expected, if unexpected it will do nothing.
+                            if params_dict[a][1][0] == 'select':
+                                select = Select(self.driver.find_element_by_xpath("//*[@data-parametername='{}']//select".format(a)))
+                                select.select_by_visible_text(b)
+                                
+            elif v[0][-1] == 'input':
+                v.append(('textbox', 'plain text'))
+                #If provided_args is not None and not dry_run -- do stuff for textbox only; use dict.get(key) check
+                if kwargs and not dry_run:
+                    for a, b in kwargs.items():
+                        if params_dict.get(a): #ensure the key is expected, if unexpected it will do nothing.
+                            if params_dict[a][1][0] == 'textbox':
+                                form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
+                                form_input_div.find_element_by_xpath('.//input').send_keys(b)
+
+            else:
+                form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(k))
+                div_id = form_input_div.get_attribute('id') + '_divDropDown'
+                #More reliable to use execute script to avoid "other element would get the click error"
+                self.driver.execute_script('arguments[0].click();', form_input_div.find_element_by_xpath('.//input')) #Reveal the options
+                div_for_input = self.driver.find_element_by_xpath('//div[@id="{}"]'.format(div_id))
+                all_input_labels = div_for_input.find_elements_by_xpath('.//input[@type != "hidden"]/following-sibling::label')
+                all_input_labels_txt = [i.text for i in all_input_labels]
+                dict_opts = dict.fromkeys(all_input_labels_txt, (True, False))
+                v.append(('dropdown', dict_opts))
+                #If provided_args is not None and not dry_run -- do stuff for dropdown only; use dict.get(key) check
+                if kwargs and not dry_run:
+                    for a, b in kwargs.items():
+                        if params_dict.get(a): #ensure the key is expected, if unexpected it will do nothing.
+                            if params_dict[a][1][0] == 'dropdown':
+                                form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
+                                div_id = form_input_div.get_attribute('id') + '_divDropDown'
+                                self.driver.execute_script('arguments[0].click();', form_input_div.find_element_by_xpath('.//input')) #Reveal the options
+                                div_for_input = self.driver.find_element_by_xpath('//div[@id="{}"]'.format(div_id))
+                                all_inputs = div_for_input.find_elements_by_xpath('.//input[@type != "hidden"]')
+                                all_inputs[0].click() #Click the select all to clear all options
+                                time.sleep(1) #TODO: WebDriverWait
+                                for j, x in v.items():
+                                    elem_idx = [i for i in params_dict[a][1][1].keys()].index(b)
+                                    if x: #Double checking that the user sent True/truthy value
+                                        self.driver.execute_script('arguments[0].click();', all_inputs[elem_idx])
+        return params_dict
+
+
+    def download_ods_report(self, lea_code=None, report_code=None, max_attempts=10, dry_run=False, temp_folder_name=None, **kwargs):
+
+        report_code = report_code.lower()
+
+        if temp_folder_name:
+            report_download_folder_path = self.temp_folder_path + '/' + temp_folder_name
+            os.makedirs(report_download_folder_path, exist_ok=True)
+        else:
+            report_download_folder_path = mkdtemp()
+
+        self.driver = DriverBuilder().get_driver(download_location=report_download_folder_path, headless=self.headless)
+        self._login()
+        self._select_lea(lea_code)
+
+        #Report link lookup
+        self.driver.get('https://www.calpads.org/Report/ODS')
+        self.driver.get(self.__get_report_link(report_code, is_snapshot=False))
+        self.driver.switch_to.frame(self.driver.find_element_by_xpath('//*[@id="reports"]//iframe'))
+
+        self.__check_login_request()
+
+        self.__wait_for_view_report_clickable(max_attempts)
+
+        all_form_elements = self.driver.find_elements_by_xpath("//*[@data-parametername]")
+        params_dict = dict.fromkeys([i.get_attribute('data-parametername') for i in all_form_elements])
+        for i in all_form_elements:
+            tag_combos = []
+            key = i.get_attribute('data-parametername')
+            for j in i.find_elements_by_xpath('.//*'):
+                tag_combos.append(j.tag_name) #Find all the tags that are under the parameter div (i.e. where the form field is located)
+            params_dict[key] = [tuple(tag_combos)]
+
+        parsed_params_dict = self._parse_ods_form(params_dict, dry_run, **kwargs)
+
+        if dry_run:
+            self.driver.quit()
+            return parsed_params_dict
+        
+        if self.__wait_for_view_report_clickable(max_attempts):
+            view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
+            view_report.click()
+
+        result = self._download_report_on_page(max_attempts=max_attempts, lea_code=lea_code, report_code=report_code, dl_folder=report_download_folder_path, dl_type='csv')
+        
+        #clean up
+        if not temp_folder_name:
+            shutil.rmtree(report_download_folder_path)
+        
+        return result
+        
+
+
 
 def wait_for_new_file_in_folder(folder_path, num_files_original, max_attempts=20000):
     """ Waits until a new file shows up in a folder.
