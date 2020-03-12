@@ -44,6 +44,12 @@ class TestCalpadsDataSource(unittest.TestCase):
     def setUp(self):
         self.assertTrue(isinstance(self.cp, cp.Calpads))
 
+    def tearDown(self):
+        if os.path.exists(config['Calpads']['temp_folder_path']):
+            shutil.rmtree(config['Calpads']['temp_folder_path'])
+        if self.cp.driver.service.is_connectable():
+            self.cp.driver.quit()
+
     def test_download_url_report(self):
         with self.assertRaises(NotImplementedError):
             self.cp.download_url_report('testing.com', '.')
@@ -72,7 +78,8 @@ class TestCalpadsExtracts(unittest.TestCase):
     def tearDown(self):
         if os.path.exists(config['Calpads']['temp_folder_path']):
             shutil.rmtree(config['Calpads']['temp_folder_path'])
-        self.cp.driver.quit()
+        if self.cp.driver.service.is_connectable():
+            self.cp.driver.quit()
 
     def test_request_extracts_nonyear(self):
         for extract in EXTRACTS:
@@ -119,3 +126,35 @@ class TestCalpadsExtracts(unittest.TestCase):
                                         extract_name=extract,
                                         temp_folder_name=config['Calpads']['temp_folder_path'])
                 self.assertTrue(len(os.listdir(config['Calpads']['temp_folder_path'])) == 1)
+
+class TestCalpadsReports(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        config_section_name = 'Calpads'
+        args = {
+            'hostname': config[config_section_name]['hostname'],
+            'username': config[config_section_name]['username'],
+            'password': config[config_section_name]['password'],
+            'wait_time': int(config[config_section_name]['wait_time']),
+            'temp_folder_path': config[config_section_name]['temp_folder_path']
+        }
+        cls.cp = cp.Calpads(**args)
+    
+    def setUp(self):
+        self.assertTrue(isinstance(self.cp, cp.Calpads))
+    
+    def tearDown(self):
+        if os.path.exists(config['Calpads']['temp_folder_path']):
+            shutil.rmtree(config['Calpads']['temp_folder_path'])
+        if self.cp.driver.service.is_connectable():
+            self.cp.driver.quit()
+    
+    def test_download_snapshot_report(self):
+        self.assertTrue(isinstance(self.cp.download_snapshot_report(lea_code=config['Calpads']['test_lea'],
+                                                                report_code='1.2', dry_run=False), 
+                                    pd.DataFrame))
+    
+    def test_download_ods_report(self):
+        self.assertTrue(isinstance(self.cp.download_ods_report(lea_code=config['Calpads']['test_lea'],
+                                                                report_code='1.2', dry_run=False), 
+                                    pd.DataFrame))
