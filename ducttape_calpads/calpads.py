@@ -834,8 +834,72 @@ class Calpads(WebUIDataSource, LoggingMixin):
         else:
             return False
     
+    def _parse_report_form(self, params_dict, max_attempts, dry_run, **kwargs):
+        """Parse and when it's not a dry run, fill in the form."""
+
+        for k, v in params_dict.items():
+            if v[0][0] == 'select':
+                select = Select(self.driver.find_element_by_xpath("//*[@data-parametername='{}']//select".format(k)))
+                v.append(('select', tuple(i.text for i in select.options)))
+                                
+            elif v[0][-1] == 'input':
+                v.append(('textbox', 'plain text'))
+
+            else:
+                form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(k))
+                div_id = form_input_div.get_attribute('id') + '_divDropDown'
+                #More reliable to use execute script to avoid "other element would get the click error"
+                self.driver.execute_script('arguments[0].click();', form_input_div.find_element_by_xpath('.//input')) #Reveal the options
+                div_for_input = self.driver.find_element_by_xpath('//div[@id="{}"]'.format(div_id))
+                all_input_labels = div_for_input.find_elements_by_xpath('.//input[@type != "hidden"]/following-sibling::label')
+                all_input_labels_txt = [i.text for i in all_input_labels]
+                dict_opts = dict.fromkeys(all_input_labels_txt, (True, False))
+                v.append(('dropdown', dict_opts))
+        
+        if kwargs and not dry_run:
+            self._fill_report_form(params_dict, max_attempts, **kwargs)
+
+        return params_dict
+
+    def _fill_report_form(self, params_dict, max_attempts, **kwargs):
+
+        #If provided_args is not None and not dry_run -- do stuff for selects only; use dict.get(key) check
+        for a, b in kwargs.items():
+            if params_dict.get(a): #ensure the key is expected, if unexpected it will do nothing.
+                if params_dict[a][1][0] == 'select':
+                    select = Select(self.driver.find_element_by_xpath("//*[@data-parametername='{}']//select".format(a)))
+                    select.select_by_visible_text(b)
+                    if not self.__wait_for_view_report_clickable(max_attempts):
+                        self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
+                        return False #TODO: pass in max_attempts variable
+                
+                elif params_dict[a][1][0] == 'textbox':
+                    form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
+                    form_input_div.find_element_by_xpath('.//input').send_keys(b)
+                    if not self.__wait_for_view_report_clickable(max_attempts):
+                        self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
+                        return False #TODO: pass in max_attempts variable
+                
+                else:
+                    #Expecting the rest to be dropdowns only
+                    form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
+                    div_id = form_input_div.get_attribute('id') + '_divDropDown'
+                    self.driver.execute_script('arguments[0].click();', form_input_div.find_element_by_xpath('.//input')) #Reveal the options
+                    div_for_input = self.driver.find_element_by_xpath('//div[@id="{}"]'.format(div_id))
+                    all_inputs = div_for_input.find_elements_by_xpath('.//input[@type != "hidden"]')
+                    all_inputs[0].click() #Click the select all to clear all options
+                    time.sleep(1) #TODO: WebDriverWait
+                    for j, x in b.items():
+                        elem_idx = [i for i in params_dict[a][1][1].keys()].index(j)
+                        if x: #Double checking that the user sent True/truthy value
+                            self.driver.execute_script('arguments[0].click();', all_inputs[elem_idx])
+                            if not self.__wait_for_view_report_clickable(max_attempts):
+                                self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
+                                return False #TODO: pass in max_attempts variable
+
     def download_snapshot_report(self, lea_code, report_code, snapshot_status='Certified', 
-                                academic_year='2019-2020', dl_type='csv', max_attempts=10, temp_folder_name=None):
+                                academic_year='2019-2020', dl_type='csv', max_attempts=10, temp_folder_name=None,
+                                dry_run=False, **kwargs):
         """Download a CALPADS snapshot report in a specified format. 
         
         Args:
@@ -864,6 +928,12 @@ class Calpads(WebUIDataSource, LoggingMixin):
             os.makedirs(report_download_folder_path, exist_ok=True)
         else:
             report_download_folder_path = mkdtemp()
+        
+        #Set defaults for the form input if none provided
+        if not kwargs:
+            kwargs = {'Status': 'Revised Uncertified'}
+        elif kwargs and not kwargs.get('Status'):
+            kwargs.update({'Status': 'Revised Uncertified'})
 
         self.driver = DriverBuilder().get_driver(download_location=report_download_folder_path, headless=self.headless)
         self._login()
@@ -872,23 +942,26 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #Report link lookup
         self.driver.get('https://www.calpads.org/Report/Snapshot')
         self.driver.get(self.__get_report_link(report_code))
-        self.driver.switch_to.frame(self.driver.find_element_by_xpath('//*[@id="reports"]/div/div/div/iframe'))
+        self.driver.switch_to.frame(self.driver.find_element_by_xpath('//*[@id="reports"]//iframe'))
 
         self.__check_login_request()
 
         self.__wait_for_view_report_clickable(max_attempts)
         
-        yr = Select(self.driver.find_element_by_id('ReportViewer1_ctl08_ctl03_ddValue'))
-        yr.select_by_visible_text(academic_year)
-        if not self.__wait_for_view_report_clickable(max_attempts):
-            self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
-            return False
-        time.sleep(2) #TODO: WebDriverWait
-        status = Select(self.driver.find_element_by_id('ReportViewer1_ctl08_ctl07_ddValue'))
-        status.select_by_visible_text(snapshot_status)
-        if not self.__wait_for_view_report_clickable(max_attempts):
-                self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
-                return False 
+        all_form_elements = self.driver.find_elements_by_xpath("//*[@data-parametername]")
+        params_dict = dict.fromkeys([i.get_attribute('data-parametername') for i in all_form_elements])
+        for i in all_form_elements:
+            tag_combos = []
+            key = i.get_attribute('data-parametername')
+            for j in i.find_elements_by_xpath('.//*'):
+                tag_combos.append(j.tag_name) #Find all the tags that are under the parameter div (i.e. where the form field is located)
+            params_dict[key] = [tuple(tag_combos)]
+
+        parsed_params_dict = self._parse_report_form(params_dict, max_attempts, dry_run, **kwargs)
+
+        if dry_run:
+            self.driver.quit()
+            return parsed_params_dict
         
         if self.__wait_for_view_report_clickable(max_attempts):
             view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
@@ -906,66 +979,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #TODO: result = None when the option is PDF which might be confusing/unexpected for users. Not sure what a better alternative would be.
         return result
     
-    def _parse_report_form(self, params_dict, dry_run, **kwargs):
-        """Parse and when it's not a dry run, fill in the form."""
-
-        for k, v in params_dict.items():
-            if v[0][0] == 'select':
-                select = Select(self.driver.find_element_by_xpath("//*[@data-parametername='{}']//select".format(k)))
-                v.append(('select', tuple(i.text for i in select.options)))
-                                
-            elif v[0][-1] == 'input':
-                v.append(('textbox', 'plain text'))
-
-            else:
-                form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(k))
-                div_id = form_input_div.get_attribute('id') + '_divDropDown'
-                #More reliable to use execute script to avoid "other element would get the click error"
-                self.driver.execute_script('arguments[0].click();', form_input_div.find_element_by_xpath('.//input')) #Reveal the options
-                div_for_input = self.driver.find_element_by_xpath('//div[@id="{}"]'.format(div_id))
-                all_input_labels = div_for_input.find_elements_by_xpath('.//input[@type != "hidden"]/following-sibling::label')
-                all_input_labels_txt = [i.text for i in all_input_labels]
-                dict_opts = dict.fromkeys(all_input_labels_txt, (True, False))
-                v.append(('dropdown', dict_opts))
-         
-        if kwargs and not dry_run:
-            self._fill_report_form(params_dict, **kwargs)
-
-        return params_dict
-
-    def _fill_report_form(self, params_dict, **kwargs):
-
-        #If provided_args is not None and not dry_run -- do stuff for selects only; use dict.get(key) check
-        for a, b in kwargs.items():
-            if params_dict.get(a): #ensure the key is expected, if unexpected it will do nothing.
-                print(params_dict.get(a))
-                if params_dict[a][1][0] == 'select':
-                    select = Select(self.driver.find_element_by_xpath("//*[@data-parametername='{}']//select".format(a)))
-                    select.select_by_visible_text(b)
-                    self.__wait_for_view_report_clickable(10) #TODO: pass in max_attempts variable
-                
-                elif params_dict[a][1][0] == 'textbox':
-                    form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
-                    form_input_div.find_element_by_xpath('.//input').send_keys(b)
-                    self.__wait_for_view_report_clickable(10) #TODO: pass in max_attempts variable
-                
-                else:
-                    #Expecting the rest to be dropdowns only
-                    form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
-                    div_id = form_input_div.get_attribute('id') + '_divDropDown'
-                    self.driver.execute_script('arguments[0].click();', form_input_div.find_element_by_xpath('.//input')) #Reveal the options
-                    div_for_input = self.driver.find_element_by_xpath('//div[@id="{}"]'.format(div_id))
-                    all_inputs = div_for_input.find_elements_by_xpath('.//input[@type != "hidden"]')
-                    all_inputs[0].click() #Click the select all to clear all options
-                    time.sleep(1) #TODO: WebDriverWait
-                    for j, x in b.items():
-                        elem_idx = [i for i in params_dict[a][1][1].keys()].index(j)
-                        if x: #Double checking that the user sent True/truthy value
-                            self.driver.execute_script('arguments[0].click();', all_inputs[elem_idx])
-                            self.__wait_for_view_report_clickable(10) #TODO: pass in max_attempts variable
-                    
-    
-    def download_ods_report(self, lea_code=None, report_code=None, max_attempts=10, dry_run=False, temp_folder_name=None, **kwargs):
+    def download_ods_report(self, lea_code=None, report_code=None, max_attempts=10, temp_folder_name=None, dry_run=False, **kwargs):
 
         report_code = report_code.lower()
 
@@ -997,7 +1011,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 tag_combos.append(j.tag_name) #Find all the tags that are under the parameter div (i.e. where the form field is located)
             params_dict[key] = [tuple(tag_combos)]
 
-        parsed_params_dict = self._parse_report_form(params_dict, dry_run, **kwargs)
+        parsed_params_dict = self._parse_report_form(params_dict, max_attempts, dry_run, **kwargs)
 
         if dry_run:
             self.driver.quit()
@@ -1006,6 +1020,10 @@ class Calpads(WebUIDataSource, LoggingMixin):
         if self.__wait_for_view_report_clickable(max_attempts):
             view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
             view_report.click()
+            #Some reports require two clicks of View Report for no apparent reason
+            if report_code in ['1.2'] and self.__wait_for_view_report_clickable(1):
+                view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00')
+                view_report.click()
 
         result = self._download_report_on_page(max_attempts=max_attempts, lea_code=lea_code, report_code=report_code, dl_folder=report_download_folder_path, dl_type='csv')
         
