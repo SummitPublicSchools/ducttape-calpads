@@ -114,11 +114,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
         print() for checking the language data values in a prettier format.
 
         Args:
-        ssid: CALPADS state student identifier. Can be either a string or integer format.
-        second_chance: used during recursion to try again if the wrong table is found.
+            ssid: CALPADS state student identifier. Can be either a string or integer format.
+            second_chance: used during recursion to try again if the wrong table is found.
 
         Returns:
-        language_data (DataFrame): The SELA language information on a CALPADS student profile or raise ReportNotFound exception if it fails
+            language_data (DataFrame): The SELA language information on a CALPADS student profile or raise ReportNotFound exception if it fails
         """
         self.driver = DriverBuilder().get_driver(headless=self.headless)
         self._login()
@@ -611,7 +611,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 For SSID Request Extract, pass in 'SSID'.
                 Spelling matters, capitalization does not. Raises ReportNotFound if report name is unrecognized/not supported.
             temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. If this directory does not exist,
-                it will be created. The parent directory will be the temp_folder_path used when setting up Calpads object. If None, a temporary directory
+                it will be created. The parent directory will be the temp_folder_path used when instantiating Calpads object. If None, a temporary directory
                 will be created and deleted as part of cleanup.
             max_attempts (int): the max number of times to try checking for the download. There's a 1 minute wait between each attempt.
             pandas_kwargs (dict): additional arguments to pass to Pandas read_csv
@@ -804,7 +804,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             btn = self.driver.find_element_by_class_name('btn-primary')
             btn.click() #TODO: Review code and add similar try/except/else situations
 
-    def _download_report_on_page(self, lea_code=None, report_code=None, dl_folder=None, dl_type='csv', max_attempts=10,
+    def _download_report_on_page(self, lea_code, report_code, dl_folder=None, dl_type='csv', max_attempts=10,
                                 pandas_kwargs=None):
         """Downloads the report on the page.
         If download_report exceeds max download dropdown attempts after clicking view report,
@@ -831,7 +831,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 #TODO: Write a better exception?
                 raise Exception("Download may have taken too long. Ending program.")
             #TODO: Denote ODS vs. Snapshot in new file name
-            self._rename_a_calpads_download(folder_path=dl_folder, new_file_text="{} {} ".format(lea_code,report_code) )
+            self._rename_a_calpads_download(folder_path=dl_folder, new_file_text="{} {} ".format(lea_code, report_code) )
             self.log.info('{} Report successfully downloaded for {}.'.format(report_code, lea_code))
             self.driver.switch_to.default_content()
             
@@ -853,8 +853,19 @@ class Calpads(WebUIDataSource, LoggingMixin):
         else:
             return False
     
-    def _parse_report_form(self, lea_code, params_dict, max_attempts, dry_run, **kwargs):
+    def _parse_report_form(self, lea_code, max_attempts, dry_run, **kwargs):
         """Parse and when it's not a dry run, fill in the form."""
+
+        all_form_elements = self.driver.find_elements_by_xpath("//*[@data-parametername]")
+        params_dict = dict.fromkeys([i.get_attribute('data-parametername') for i in all_form_elements])
+        for i in all_form_elements:
+            tag_combos = []
+            key = i.get_attribute('data-parametername')
+            for j in i.find_elements_by_xpath('.//*'):
+                tag_combos.append(j.tag_name) #Find all the tags that are under the parameter div (i.e. where the form field is located)
+                if j.tag_name == 'span' and 'calendar' in j.get_attribute('class'):
+                    tag_combos = tag_combos[:-2] #If it's a calendar date input, remove the last two tags so it's treated like a textbox
+            params_dict[key] = [tuple(tag_combos)]
 
         for k, v in params_dict.items():
             if v[0][0] == 'select':
@@ -929,8 +940,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                                 self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
                                 return False #TODO: pass in max_attempts variable
 
-    def download_snapshot_report(self, lea_code, report_code, snapshot_status='Certified', 
-                                academic_year='2019-2020', dl_type='csv', max_attempts=10, temp_folder_name=None,
+    def download_snapshot_report(self, lea_code, report_code, dl_type='csv', max_attempts=10, temp_folder_name=None,
                                 dry_run=False, pandas_kwargs=None, **kwargs):
         """Download a CALPADS snapshot report in a specified format. 
         
@@ -939,9 +949,6 @@ class Calpads(WebUIDataSource, LoggingMixin):
             report_code (str): Currently supports all known reports. Expected format is a string e.g. '8.1', '1.17', and '1.18'.
                 For reports that have letters in them, for example the 8.1 EOY3, expected input is '8.1eoy3' OR '8.1EOY3'. 
                 No spaces, all one word.
-            academic_year (str): Use format YYYY-YYYY.
-            snapshot_status (str): Defaults to 'Certified'.
-                Pass in a string of other options (e.g. 'Revised Uncertified') to use the alternative value.
             dl_type (str): The format in which you want the download for the report. 
                 Currently supports: csv, excel, and pdf.
             max_attempts (int): how often to keep trying to check if view report is clickable or if the download dropdown is visible.
@@ -949,11 +956,16 @@ class Calpads(WebUIDataSource, LoggingMixin):
             temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. 
             If this directory does not exist, it will be created. The parent directory will be the temp_folder_path passed in
             when instantiating the Calpads object. If None, a temporary directory will be created and deleted as part of cleanup.
+            dry_run (bool): when False, it downloads the report. When True, it doesn't download the report and instead returns
+                a dict wih the form fields and their expected inputs.
             pandas_kwargs (dict): keywords to pass into Pandas read method, read_csv for dl_type='csv' or
                 read_excel for dl_type='excel'
+            **kwargs: keyword arguments for report inputs/fields. Valid keywords are dynamically assessed per report. 
+                To know the options and expected formatting for each report, set dry_run=True and a dict will be returned instead.
         
         Returns:
             bool: True for a successful download of report, else False.
+            dict: when dry_run=True, it returns a dict of the form fields and their expected inputs for report manipulation
         """
         report_code = report_code.lower()
 
@@ -984,19 +996,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
         self.__check_login_request()
 
         self.__wait_for_view_report_clickable(max_attempts)
-        
-        all_form_elements = self.driver.find_elements_by_xpath("//*[@data-parametername]")
-        params_dict = dict.fromkeys([i.get_attribute('data-parametername') for i in all_form_elements])
-        for i in all_form_elements:
-            tag_combos = []
-            key = i.get_attribute('data-parametername')
-            for j in i.find_elements_by_xpath('.//*'):
-                tag_combos.append(j.tag_name) #Find all the tags that are under the parameter div (i.e. where the form field is located)
-                if j.tag_name == 'span' and 'calendar' in j.get_attribute('class'):
-                    tag_combos = tag_combos[:-2] #If it's a calendar date input, remove the last two tags so it's treated like a textbox
-            params_dict[key] = [tuple(tag_combos)]
 
-        parsed_params_dict = self._parse_report_form(lea_code, params_dict, max_attempts, dry_run, **kwargs)
+        parsed_params_dict = self._parse_report_form(lea_code, max_attempts, dry_run, **kwargs)
 
         if dry_run:
             self.driver.quit()
@@ -1019,9 +1020,34 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #TODO: result = None when the option is PDF which might be confusing/unexpected for users. Not sure what a better alternative would be.
         return result
     
-    def download_ods_report(self, lea_code, report_code=None, max_attempts=10, 
-                            temp_folder_name=None, dry_run=False, pandas_kwargs=None, **kwargs):
-
+    def download_ods_report(self, lea_code, report_code, max_attempts=10, temp_folder_name=None, 
+                            dry_run=False, pandas_kwargs=None, **kwargs):
+        """Download a CALPADS ODS report in a specified format. 
+        
+        Args:
+            lea_code (str): The 7 digit identifier for your LEA passed in as a string.
+            report_code (str): Currently supports all known reports. Expected format is a string e.g. '8.1', '1.17', and '1.18'.
+                For reports that have letters in them, for example the 8.1 EOY3, expected input is '8.1eoy3' OR '8.1EOY3'. 
+                No spaces, all one word.
+            dl_type (str): The format in which you want the download for the report. 
+                Currently supports: csv, excel, and pdf.
+            max_attempts (int): how often to keep trying to check if view report is clickable or if the download dropdown is visible.
+                Each additional attempt is a 1 minute wait time.
+            temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. 
+            If this directory does not exist, it will be created. The parent directory will be the temp_folder_path passed in
+            when instantiating the Calpads object. If None, a temporary directory will be created and deleted as part of cleanup.
+            dry_run (bool): when False, it downloads the report. When True, it doesn't download the report and instead returns
+                a dict wih the form fields and their expected inputs.
+            pandas_kwargs (dict): keywords to pass into Pandas read method, read_csv for dl_type='csv' or
+                read_excel for dl_type='excel'
+            **kwargs: keyword arguments for report inputs/fields. Valid keywords are dynamically assessed per report. 
+                To know the options and expected formatting for each report, set dry_run=True and a dict will be returned instead.
+        
+        Returns:
+            bool: True for a successful download of report, else False.
+            dict: when dry_run=True, it returns a dict of the form fields and their expected inputs for report manipulation
+        """
+        
         report_code = report_code.lower()
 
         if temp_folder_name:
@@ -1046,18 +1072,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
 
         self.__wait_for_view_report_clickable(max_attempts)
 
-        all_form_elements = self.driver.find_elements_by_xpath("//*[@data-parametername]")
-        params_dict = dict.fromkeys([i.get_attribute('data-parametername') for i in all_form_elements])
-        for i in all_form_elements:
-            tag_combos = []
-            key = i.get_attribute('data-parametername')
-            for j in i.find_elements_by_xpath('.//*'):
-                tag_combos.append(j.tag_name) #Find all the tags that are under the parameter div (i.e. where the form field is located)
-                if j.tag_name == 'span' and 'calendar' in j.get_attribute('class'):
-                    tag_combos = tag_combos[:-2] #If it's a calendar date input, remove the last two tags so it's treated like a textbox
-            params_dict[key] = [tuple(tag_combos)]
-
-        parsed_params_dict = self._parse_report_form(lea_code, params_dict, max_attempts, dry_run, **kwargs)
+        parsed_params_dict = self._parse_report_form(lea_code, max_attempts, dry_run, **kwargs)
 
         if dry_run:
             self.driver.quit()
@@ -1080,7 +1095,6 @@ class Calpads(WebUIDataSource, LoggingMixin):
             shutil.rmtree(report_download_folder_path)
         
         return result
-        
 
 
 
