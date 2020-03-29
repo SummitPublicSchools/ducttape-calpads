@@ -13,7 +13,8 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import (
     TimeoutException,
     NoSuchElementException,
-    ElementNotVisibleException
+    ElementNotVisibleException,
+    StaleElementReferenceException
 )
 from ducttape.webui_datasource import WebUIDataSource
 from ducttape.exceptions import ReportNotFound, ReportNotReady, RequestError
@@ -594,7 +595,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
         if by_date_range:
             self._fill_typical_date_range_form(start_date, end_date, extract_name='SSRV')
 
-    def download_extract(self, lea_code, extract_name, temp_folder_name=None, max_attempts=10, pandas_read_csv_kwargs={}):
+    def download_extract(self, lea_code, extract_name, temp_folder_name=None, 
+                            max_attempts=10, pandas_kwargs=None):
         """
         Request an extract with the extract_name from CALPADS.
         
@@ -612,7 +614,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 it will be created. The parent directory will be the temp_folder_path used when setting up Calpads object. If None, a temporary directory
                 will be created and deleted as part of cleanup.
             max_attempts (int): the max number of times to try checking for the download. There's a 1 minute wait between each attempt.
-            pandas_read_csv_kwargs: additional arguments to pass to Pandas read_csv
+            pandas_kwargs (dict): additional arguments to pass to Pandas read_csv
 
         Returns:
             DataFrame: A Pandas DataFrame of the extract
@@ -624,6 +626,9 @@ class Calpads(WebUIDataSource, LoggingMixin):
             os.makedirs(extract_download_folder_path, exist_ok=True)
         else:
             extract_download_folder_path = mkdtemp()
+
+        if not pandas_kwargs:
+            pandas_kwargs = {}
 
         self.driver = DriverBuilder().get_driver(download_location=extract_download_folder_path, headless=self.headless)
         self._login()
@@ -688,11 +693,13 @@ class Calpads(WebUIDataSource, LoggingMixin):
             raise ReportNotFound
         
         #Set a default variable for names:
-        if 'names' not in pandas_read_csv_kwargs.keys():
+        if 'names' not in pandas_kwargs.keys():
             #If no column names are passed into pandas, use the default file layout names.
-            kwargs_copy = pandas_read_csv_kwargs.copy()
+            kwargs_copy = pandas_kwargs.copy()
             kwargs_copy['names'] = EXTRACT_COLUMNS[extract_name]
-        extract_df = pd.read_csv(get_most_recent_file_in_dir(extract_download_folder_path), sep='^', header=None, **kwargs_copy)
+            if not kwargs_copy.get('header'):
+                kwargs_copy['header'] = None
+        extract_df = pd.read_csv(get_most_recent_file_in_dir(extract_download_folder_path), sep='^', **kwargs_copy)
         self.log.info("{} {} Extract downloaded.".format(lea_code, extract_name))
         self.driver.quit()
 
@@ -715,15 +722,19 @@ class Calpads(WebUIDataSource, LoggingMixin):
                     return i.find_element_by_xpath('./../../a').get_attribute('href')
             raise ReportNotFound('{} report code cannot be found on the webpage'.format(report_code))
 
-    def __wait_for_view_report_clickable(self, max_attempts):
+    def __wait_for_view_report_clickable(self, max_attempts, wait_time=60):
         """Check for the delay before webpage allows another change in value for the report request"""
         attempts = 0
         loaded = False
         while not loaded and attempts < max_attempts:
             try:
-                view_report = WebDriverWait(self.driver, 60).until(EC.element_to_be_clickable((By.ID, 'ReportViewer1_ctl08_ctl00')))
+                view_report = WebDriverWait(self.driver, wait_time).until(EC.element_to_be_clickable((By.ID, 'ReportViewer1_ctl08_ctl00')))
             except TimeoutException:
-                self.log.info('The Report button has not loaded after 1 minute. Attempt: {}'.format(attempts+1))
+                self.log.info('The Report button has not loaded after {} seconds. Attempt: {}'.format(wait_time, attempts+1))
+                attempts += 1
+            except StaleElementReferenceException:
+                #Couldn't tell you why this error gets raised, but here we are
+                self.log.info('The Report button has not loaded after {} seconds. Attempt: {}'.format(wait_time, attempts+1))
                 attempts += 1
             else:
                 return view_report
@@ -752,6 +763,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 #Is the dropdown menu visible?
                 WebDriverWait(self.driver, 3).until(EC.visibility_of(self.driver.find_element_by_id('ReportViewer1_ctl09_ctl04_ctl00_Menu')))
             except TimeoutException:
+                #The dropdown menu is not visible
+                self.log.info('Download Attempt {} failed. Waiting 1 minute.'.format(attempts+1))
+                attempts += 1
+                time.sleep(60)
+            except StaleElementReferenceException:
+                #Some quasi random and rare cases where the report is ready for download upon visiting the page without
+                #clicking View Report appears to cause a race condition such that upon trying to find the Menu button
+                #it flags it as being stale. Just keep swimming and try again.
                 #The dropdown menu is not visible
                 self.log.info('Download Attempt {} failed. Waiting 1 minute.'.format(attempts+1))
                 attempts += 1
@@ -786,7 +805,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             btn.click() #TODO: Review code and add similar try/except/else situations
 
     def _download_report_on_page(self, lea_code=None, report_code=None, dl_folder=None, dl_type='csv', max_attempts=10,
-                                pandas_read_csv_kwargs={}):
+                                pandas_kwargs=None):
         """Downloads the report on the page.
         If download_report exceeds max download dropdown attempts after clicking view report,
         use for one-off download of the report available on the page when it finishes loading.
@@ -817,9 +836,9 @@ class Calpads(WebUIDataSource, LoggingMixin):
             self.driver.switch_to.default_content()
             
             if dl_type == 'csv':
-                report_df = pd.read_csv(get_most_recent_file_in_dir(dl_folder), sep=',', **pandas_read_csv_kwargs)
+                report_df = pd.read_csv(get_most_recent_file_in_dir(dl_folder), sep=',', **pandas_kwargs)
             elif dl_type == 'excel':
-                report_df = pd.read_excel(get_most_recent_file_in_dir(dl_folder))
+                report_df = pd.read_excel(get_most_recent_file_in_dir(dl_folder), **pandas_kwargs)
             else:
                 report_df = None
             #TODO: Denote Snapshot vs. ODS download in logging
@@ -834,7 +853,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         else:
             return False
     
-    def _parse_report_form(self, params_dict, max_attempts, dry_run, **kwargs):
+    def _parse_report_form(self, lea_code, params_dict, max_attempts, dry_run, **kwargs):
         """Parse and when it's not a dry run, fill in the form."""
 
         for k, v in params_dict.items():
@@ -844,6 +863,9 @@ class Calpads(WebUIDataSource, LoggingMixin):
                                 
             elif v[0][-1] == 'input':
                 v.append(('textbox', 'plain text'))
+
+            elif v[0][-1] == 'label':
+                v.append(('textbox_defaultnull', 'plain text'))
 
             else:
                 form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(k))
@@ -857,11 +879,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 v.append(('dropdown', dict_opts))
         
         if kwargs and not dry_run:
-            self._fill_report_form(params_dict, max_attempts, **kwargs)
+            self._fill_report_form(lea_code, params_dict, max_attempts, **kwargs)
 
         return params_dict
 
-    def _fill_report_form(self, params_dict, max_attempts, **kwargs):
+    def _fill_report_form(self, lea_code, params_dict, max_attempts, **kwargs):
 
         #If provided_args is not None and not dry_run -- do stuff for selects only; use dict.get(key) check
         for a, b in kwargs.items():
@@ -871,15 +893,22 @@ class Calpads(WebUIDataSource, LoggingMixin):
                     select.select_by_visible_text(b)
                     if not self.__wait_for_view_report_clickable(max_attempts):
                         self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
-                        return False #TODO: pass in max_attempts variable
+                        return False
                 
                 elif params_dict[a][1][0] == 'textbox':
                     form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
                     form_input_div.find_element_by_xpath('.//input').send_keys(b)
                     if not self.__wait_for_view_report_clickable(max_attempts):
                         self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
-                        return False #TODO: pass in max_attempts variable
+                        return False
                 
+                elif params_dict[a][1][0] == 'textbox_defaultnull':
+                    form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
+                    form_input_div.find_element_by_xpath(".//label/preceding-sibling::input").click() #Uncheck the NULL value
+                    form_input_div.find_element_by_xpath('.//input').send_keys(b) #Send value to the first input
+                    if not self.__wait_for_view_report_clickable(max_attempts):
+                        self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
+                        return False
                 else:
                     #Expecting the rest to be dropdowns only
                     form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
@@ -899,7 +928,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
 
     def download_snapshot_report(self, lea_code, report_code, snapshot_status='Certified', 
                                 academic_year='2019-2020', dl_type='csv', max_attempts=10, temp_folder_name=None,
-                                dry_run=False, **kwargs):
+                                dry_run=False, pandas_kwargs=None, **kwargs):
         """Download a CALPADS snapshot report in a specified format. 
         
         Args:
@@ -917,6 +946,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
             temp_folder_name (str): the name for a sub-directory in which the files from the browser will be stored. 
             If this directory does not exist, it will be created. The parent directory will be the temp_folder_path passed in
             when instantiating the Calpads object. If None, a temporary directory will be created and deleted as part of cleanup.
+            pandas_kwargs (dict): keywords to pass into Pandas read method, read_csv for dl_type='csv' or
+                read_excel for dl_type='excel'
         
         Returns:
             bool: True for a successful download of report, else False.
@@ -928,6 +959,9 @@ class Calpads(WebUIDataSource, LoggingMixin):
             os.makedirs(report_download_folder_path, exist_ok=True)
         else:
             report_download_folder_path = mkdtemp()
+
+        if not pandas_kwargs:
+            pandas_kwargs = {}
         
         #Set defaults for the form input if none provided
         if not kwargs:
@@ -955,9 +989,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
             key = i.get_attribute('data-parametername')
             for j in i.find_elements_by_xpath('.//*'):
                 tag_combos.append(j.tag_name) #Find all the tags that are under the parameter div (i.e. where the form field is located)
+                if j.tag_name == 'span' and 'calendar' in j.get_attribute('class'):
+                    tag_combos = tag_combos[:-2] #If it's a calendar date input, remove the last two tags so it's treated like a textbox
             params_dict[key] = [tuple(tag_combos)]
 
-        parsed_params_dict = self._parse_report_form(params_dict, max_attempts, dry_run, **kwargs)
+        parsed_params_dict = self._parse_report_form(lea_code, params_dict, max_attempts, dry_run, **kwargs)
 
         if dry_run:
             self.driver.quit()
@@ -971,7 +1007,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00')
                 view_report.click()
 
-        result = self._download_report_on_page(max_attempts=max_attempts, lea_code=lea_code, report_code=report_code, dl_folder=report_download_folder_path, dl_type=dl_type)
+        result = self._download_report_on_page(max_attempts=max_attempts, lea_code=lea_code, report_code=report_code, 
+                                                dl_folder=report_download_folder_path, dl_type=dl_type, pandas_kwargs=pandas_kwargs)
         
         #clean up
         if not temp_folder_name:
@@ -979,7 +1016,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #TODO: result = None when the option is PDF which might be confusing/unexpected for users. Not sure what a better alternative would be.
         return result
     
-    def download_ods_report(self, lea_code=None, report_code=None, max_attempts=10, temp_folder_name=None, dry_run=False, **kwargs):
+    def download_ods_report(self, lea_code, report_code=None, max_attempts=10, 
+                            temp_folder_name=None, dry_run=False, pandas_kwargs=None, **kwargs):
 
         report_code = report_code.lower()
 
@@ -988,6 +1026,9 @@ class Calpads(WebUIDataSource, LoggingMixin):
             os.makedirs(report_download_folder_path, exist_ok=True)
         else:
             report_download_folder_path = mkdtemp()
+        
+        if not pandas_kwargs:
+            pandas_kwargs = {}
 
         self.driver = DriverBuilder().get_driver(download_location=report_download_folder_path, headless=self.headless)
         self._login()
@@ -1009,9 +1050,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
             key = i.get_attribute('data-parametername')
             for j in i.find_elements_by_xpath('.//*'):
                 tag_combos.append(j.tag_name) #Find all the tags that are under the parameter div (i.e. where the form field is located)
+                if j.tag_name == 'span' and 'calendar' in j.get_attribute('class'):
+                    tag_combos = tag_combos[:-2] #If it's a calendar date input, remove the last two tags so it's treated like a textbox
             params_dict[key] = [tuple(tag_combos)]
 
-        parsed_params_dict = self._parse_report_form(params_dict, max_attempts, dry_run, **kwargs)
+        parsed_params_dict = self._parse_report_form(lea_code, params_dict, max_attempts, dry_run, **kwargs)
 
         if dry_run:
             self.driver.quit()
@@ -1021,11 +1064,13 @@ class Calpads(WebUIDataSource, LoggingMixin):
             view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
             view_report.click()
             #Some reports require two clicks of View Report for no apparent reason
-            if report_code in ['1.2'] and self.__wait_for_view_report_clickable(1):
+            if (report_code in ['1.2', '1.3', '1.5', '12.1', '3.2', '3.3', '3.6', '5.1'] 
+                    and self.__wait_for_view_report_clickable(1, 2)):
                 view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00')
                 view_report.click()
 
-        result = self._download_report_on_page(max_attempts=max_attempts, lea_code=lea_code, report_code=report_code, dl_folder=report_download_folder_path, dl_type='csv')
+        result = self._download_report_on_page(lea_code=lea_code, report_code=report_code, dl_folder=report_download_folder_path, 
+                                                dl_type='csv', max_attempts=max_attempts, pandas_kwargs=pandas_kwargs)
         
         #clean up
         if not temp_folder_name:
