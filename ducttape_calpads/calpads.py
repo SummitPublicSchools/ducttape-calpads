@@ -1020,7 +1020,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #TODO: result = None when the option is PDF which might be confusing/unexpected for users. Not sure what a better alternative would be.
         return result
     
-    def download_ods_report(self, lea_code, report_code, max_attempts=10, temp_folder_name=None, 
+    def download_ods_report(self, lea_code, report_code, dl_type='csv', max_attempts=10, temp_folder_name=None, 
                             dry_run=False, pandas_kwargs=None, **kwargs):
         """Download a CALPADS ODS report in a specified format. 
         
@@ -1088,7 +1088,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 view_report.click()
 
         result = self._download_report_on_page(lea_code=lea_code, report_code=report_code, dl_folder=report_download_folder_path, 
-                                                dl_type='csv', max_attempts=max_attempts, pandas_kwargs=pandas_kwargs)
+                                                dl_type=dl_type, max_attempts=max_attempts, pandas_kwargs=pandas_kwargs)
         
         #clean up
         if not temp_folder_name:
