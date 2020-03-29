@@ -917,6 +917,9 @@ class Calpads(WebUIDataSource, LoggingMixin):
                     div_for_input = self.driver.find_element_by_xpath('//div[@id="{}"]'.format(div_id))
                     all_inputs = div_for_input.find_elements_by_xpath('.//input[@type != "hidden"]')
                     all_inputs[0].click() #Click the select all to clear all options
+                    if all_inputs[0].get_attribute('checked'):
+                        #A few reports start off as unchecked, confirm that the "Select All" option is in expected state
+                        all_inputs[0].click()
                     time.sleep(1) #TODO: WebDriverWait
                     for j, x in b.items():
                         elem_idx = [i for i in params_dict[a][1][1].keys()].index(j)
@@ -1064,7 +1067,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
             view_report.click()
             #Some reports require two clicks of View Report for no apparent reason
-            if (report_code in ['1.2', '1.3', '1.5', '12.1', '3.2', '3.3', '3.6', '5.1'] 
+            if (report_code in ['1.2', '1.3', '1.5', '12.1', '3.2', '3.3', '3.6', '5.1', '10.1', '11.1', '9.2'] 
                     and self.__wait_for_view_report_clickable(1, 2)):
                 view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00')
                 view_report.click()
