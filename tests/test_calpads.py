@@ -174,7 +174,8 @@ class TestCalpadsReports(unittest.TestCase):
             with self.subTest(snapshot=snapshot):
                 try:
                     self.assertTrue(isinstance(self.cp.download_snapshot_report(lea_code=config['Calpads']['test_lea'],
-                                                                        report_code=snapshot, 
+                                                                        report_code=snapshot,
+                                                                        max_attempts=3, 
                                                                         dry_run=False), 
                                             pd.DataFrame))
                 except:
@@ -188,7 +189,8 @@ class TestCalpadsReports(unittest.TestCase):
             with self.subTest(ods=ods):
                 try:
                     self.assertTrue(isinstance(self.cp.download_ods_report(lea_code=config['Calpads']['test_lea'],
-                                                                            report_code=ods, 
+                                                                            report_code=ods,
+                                                                            max_attempts=3, 
                                                                             dry_run=False), 
                                                 pd.DataFrame))
                 except:

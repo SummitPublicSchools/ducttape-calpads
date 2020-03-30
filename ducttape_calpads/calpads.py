@@ -775,6 +775,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 self.log.info('Download Attempt {} failed. Waiting 1 minute.'.format(attempts+1))
                 attempts += 1
                 time.sleep(60)
+            except NoSuchElementException:
+                #Occasionally it seems the report toolbar is potentially not loaded? Let's check if we need to click View Report again
+                if self.__wait_for_view_report_clickable(1, 2):
+                    view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00')
+                    view_report.click()
+                self.log.info('Download Attempt {} failed. Waiting 10 seconds.'.format(attempts+1))
+                attempts += 1
+                time.sleep(10)
             else:
                 dropdown = True
         
