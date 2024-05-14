@@ -8,7 +8,7 @@ with open("LICENSE", "r") as li:
 
 setup(
     name="ducttape-calpads",
-    version="0.3.0",
+    version="0.4.0",
     author="Yusuph Mkangara",
     author_email="ymkangara@summitps.org",
     description="Extension of the duct-tape package to automate CALPADS data extraction",
