@@ -49,13 +49,13 @@ class Calpads(WebUIDataSource, LoggingMixin):
         except NoSuchElementException:
             self.log.info("Was unable to reach the login page. Check the browser: {}".format(self.driver.title))
             raise RequestError("Unable to reach login page. CALPADS might be down.")
-        user = self.driver.find_element_by_id("Username")
+        user = self.driver.find_element(By.ID, "Username")
         user.send_keys(self.username)
-        pw = self.driver.find_element_by_id("Password")
+        pw = self.driver.find_element(By.ID, "Password")
         pw.send_keys(self.password)
-        agreement = self.driver.find_element_by_id("AgreementConfirmed")
+        agreement = self.driver.find_element(By.ID, "AgreementConfirmed")
         self.driver.execute_script("arguments[0].click();", agreement)
-        btn = self.driver.find_element_by_class_name('btn-primary') 
+        btn = self.driver.find_element(By.CLASS_NAME, 'btn-primary') 
         btn.click()
         try:
             WebDriverWait(self.driver, self.wait_time).until(EC.presence_of_element_located((By.ID, 'org-select')))
@@ -65,7 +65,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 #TODO: Use id, tag-name, or class for the alert if I remember the next time it happens
                 alert = WebDriverWait(self.driver, self.wait_time).until(EC.presence_of_element_located((By.XPATH, '/html/body/div[3]/div/form/div[1]')))
                 if 'alert' in alert.get_attribute('class'):
-                    self.log.info("Found an expected alert during login: '{}'".format(self.driver.find_element_by_xpath('/html/body/div[3]/div/form/div[1]/div/ul/li').text))
+                    self.log.info("Found an expected alert during login: '{}'".format(self.driver.find_element(By.XPATH, '/html/body/div[3]/div/form/div[1]/div/ul/li').text))
                     raise RequestError("Found an expected error during login")
                 else:
                     self.log.info('There was an unexpected message during login. See driver.')
@@ -88,7 +88,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
          lea_code (str): string of the seven digit number found next to your LEA name in the org select menu. For most LEAs,
          this is the CD part of the County-District-School (CDS) code. For independently reporting charters, it's the S.
          """
-         select = Select(self.driver.find_element_by_id('org-select'))
+         select = Select(self.driver.find_element(By.ID, 'org-select'))
          for opt in select.options:
              if lea_code in opt.text:
                  opt.click()
@@ -123,10 +123,10 @@ class Calpads(WebUIDataSource, LoggingMixin):
         self.driver = DriverBuilder().get_driver(headless=self.headless)
         self._login()
 
-        ssid_search = self.driver.find_element_by_id('inputSSID')
+        ssid_search = self.driver.find_element(By.ID, 'inputSSID')
         ssid_search.send_keys(ssid)
 
-        ssid_btn = self.driver.find_element_by_id('btnSearchSSIDLeftNav')
+        ssid_btn = self.driver.find_element(By.ID, 'btnSearchSSIDLeftNav')
         ssid_btn.click()
         #Wait for SELA Grid to be clickable
         elem = WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="StudentDetailsPanelBar"]/li[4]/a')))
@@ -135,14 +135,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
             WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.ID, 'SELAGrid')))
         except TimeoutException:
             #Maybe the click didn't work the first time, try clicking again
-            self.driver.find_element_by_xpath('//*[@id="StudentDetailsPanelBar"]/li[4]/a').click()
+            self.driver.find_element(By.XPATH, '//*[@id="StudentDetailsPanelBar"]/li[4]/a').click()
             WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.ID, 'SELAGrid')))
         
         try:
             WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="SELAGrid"]/table/tbody'))) #waiting for the table to load
         except TimeoutException:
             #If the table body is never in the DOM, but the table header exists, it could just mean the SSID doesn't have data.
-            if self.driver.find_element_by_xpath('//*[@id="SELAGrid"]/table'): #If the header of the table exists...
+            if self.driver.find_element(By.XPATH, '//*[@id="SELAGrid"]/table'): #If the header of the table exists...
                 lang_data = pd.read_html(self.driver.page_source)[1]
                 try:
                     assert all(lang_data.columns == ['Unnamed: 0', 'Reporting LEA', 'Acquisition Code', 'Status Date', 'Primary Language Code',
@@ -292,7 +292,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         
         #Select the schools (generally move all) TODO: Consider supporting selective school selection
         if by_date_range and extract_name not in  ['SDEM', 'DIRECTCERTIFICATION'] and extract_name not in academic_year_only_extracts:
-            self.driver.find_element_by_xpath("//*[contains(text(), 'Date Range')]").click()
+            self.driver.find_element(By.XPATH, "//*[contains(text(), 'Date Range')]").click()
         
         if extract_name == 'DIRECTCERTIFICATION':
             self.__move_all_for_extract_request(extract_name, academic_year_only_extracts, by_date_range=False)
@@ -328,7 +328,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         form_handlers[extract_name]()
 
         #Click request button
-        reqs = self.driver.find_elements_by_xpath("//button[contains(text(), 'Request File')]")
+        reqs = self.driver.find_elements(By.XPATH, "//button[contains(text(), 'Request File')]")
         for r in reqs:
             #Some pages have multiple Request File buttons in the DOM depending on the options and permissions of the user
             if r.is_displayed():
@@ -355,19 +355,19 @@ class Calpads(WebUIDataSource, LoggingMixin):
             select_xpath = "//div[contains(@id, 'DateRange')]//select[@id='bootstrap-duallistbox-nonselected-list_School']"
         else:
             select_xpath = "//*[@id='bootstrap-duallistbox-nonselected-list_School']"
-        select = Select(self.driver.find_element_by_xpath(select_xpath)) #TODO: GENERALIZE FOR ALL EXTRACTS
+        select = Select(self.driver.find_element(By.XPATH, select_xpath)) #TODO: GENERALIZE FOR ALL EXTRACTS
         static_options = len(select.options)
         n = 0
         #Going to click moveall multiple times, but I think the time.sleep() above actually solves the need for this.
         while n < static_options:
             if by_date_range and extract_name not in year_only_list: #For when you are using DateRange #TODO: Confirm behavior for all extracts.
-                moveall = self.driver.find_elements_by_xpath("//div[contains(@id, 'DateRange')]//button[contains(@title, 'Move all')]")[-1]
+                moveall = self.driver.find_elements(By.XPATH, "//div[contains(@id, 'DateRange')]//button[contains(@title, 'Move all')]")[-1]
                 moveall.click()
             else: 
-                moveall = self.driver.find_elements_by_class_name('moveall')[0]
+                moveall = self.driver.find_elements(By.CLASS_NAME, 'moveall')[0]
                 moveall.click()
             n += 1
-        assert Select(self.driver.find_element_by_xpath(select_xpath)).options.__len__() == 0, "Failed to select all of the school options"
+        assert Select(self.driver.find_element(By.XPATH, select_xpath)).options.__len__() == 0, "Failed to select all of the school options"
         #TODO: Confirm that we don't need to wait for anything here.
 
     def _fill_typical_date_range_form(self, start_date, end_date, extract_name=None):
@@ -384,8 +384,8 @@ class Calpads(WebUIDataSource, LoggingMixin):
             self.log.info("The extract request was unsuccessful.")
             self.driver.quit()
             return False
-        self.driver.find_element_by_xpath(start_date_xpath).send_keys(start_date)
-        self.driver.find_element_by_xpath(end_date_xpath).send_keys(end_date)
+        self.driver.find_element(By.XPATH, start_date_xpath).send_keys(start_date)
+        self.driver.find_element(By.XPATH, end_date_xpath).send_keys(end_date)
 
     def __fill_ssid_request_extract(self, lea_code, year_only_list, by_date_range, start_date, end_date):
         """Messiest extract request handler. Assumes that a recent SENR file has been fully Posted for the SSID extract to be current."""
@@ -393,15 +393,15 @@ class Calpads(WebUIDataSource, LoggingMixin):
         self.driver.get('https://www.calpads.org/FileSubmission')
         try:
             WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="FileSubmissionSearchResults"]/table')))
-            jid = self.driver.find_element_by_xpath('//*[@id="FileSubmissionSearchResults"]/table/tbody/tr[1]/td[2]').text            
+            jid = self.driver.find_element(By.XPATH, '//*[@id="FileSubmissionSearchResults"]/table/tbody/tr[1]/td[2]').text            
         except NoSuchElementException:
             self.driver.get('https://www.calpads.org/FileSubmission/')
             self.driver.refresh()
             WebDriverWait(self.driver, self.wait_time).until(EC.visibility_of_element_located((By.XPATH, '//*[@id="FileSubmissionSearchResults"]/table')))
         finally:
-            jid = self.driver.find_element_by_xpath('//*[@id="FileSubmissionSearchResults"]/table/tbody/tr[1]/td[2]').text
+            jid = self.driver.find_element(By.XPATH, '//*[@id="FileSubmissionSearchResults"]/table/tbody/tr[1]/td[2]').text
         #make sure the first row is what is expected
-        assert self.driver.find_element_by_xpath('//*[@id="FileSubmissionSearchResults"]/table/tbody/tr[1]/td[6]').text == 'SSID-Enrollment',  "Found a job ID, but it doesn't look like it's for an SSID extract."
+        assert self.driver.find_element(By.XPATH, '//*[@id="FileSubmissionSearchResults"]/table/tbody/tr[1]/td[6]').text == 'SSID-Enrollment',  "Found a job ID, but it doesn't look like it's for an SSID extract."
 
         #navigate to extract page
         self.driver.get('https://www.calpads.org/Extract/SSIDExtract')
@@ -411,7 +411,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             select_id = 'SelectedJobIDssidExtractbyJob'
             grade_level_xpath = '//*[@id="GradeLevel"]'
         else:
-            self.driver.find_element_by_xpath("//*[contains(text(), 'Date Range')]").click()
+            self.driver.find_element(By.XPATH, "//*[contains(text(), 'Date Range')]").click()
             jobid_option_xpath = '//*[@id="SelectedJobIDssidExtractbyDate"]/option'
             select_id = 'SelectedJobIDssidExtractbyDate'
             grade_level_xpath = '//div[@id="DateRange"]//select[@id="GradeLevel"]'
@@ -425,7 +425,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             raise ReportNotReady
         else:
             WebDriverWait(self.driver, self.wait_time).until(EC.element_located_selection_state_to_be((By.XPATH,jobid_option_xpath), True))
-            select = Select(self.driver.find_element_by_id(select_id))
+            select = Select(self.driver.find_element(By.ID, select_id))
             #Find the element that's been pre-selected
         for opt in select.all_selected_options: #TODO: this returned stale element once for some reason...
             self.driver.execute_script("arguments[0].removeAttribute('selected')", opt)
@@ -438,7 +438,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         
         self.__move_all_for_extract_request('SSID', year_only_list, by_date_range)
         #Defaulting to all grades TODO: Maybe support specific grades? Doubt it'd be useful.
-        all_grades = Select(self.driver.find_element_by_xpath(grade_level_xpath))
+        all_grades = Select(self.driver.find_element(By.XPATH, grade_level_xpath))
         all_grades.select_by_visible_text('All')
         
     def __fill_sprg_request_extract(self, active_students, by_date_range, start_date, end_date):
@@ -449,11 +449,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #Check off Active Students
         if not by_date_range:
             if active_students:
-                elem = self.driver.find_element_by_id('ActiveStudentsprgAcdmcYear')
+                elem = self.driver.find_element(By.ID, 'ActiveStudentsprgAcdmcYear')
                 elem.click()
                 #TODO: Confirm no need to wait
             
-            select = Select(self.driver.find_element_by_id('EducationProgramCodesprgAcdmcYear'))
+            select = Select(self.driver.find_element(By.ID, 'EducationProgramCodesprgAcdmcYear'))
         else:
             try:
                 WebDriverWait(self.driver, self.wait_time).until(EC.element_to_be_clickable((By.ID, 'EnrollmentStartDate')))
@@ -463,14 +463,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 return False
             
             if active_students:
-                elem = self.driver.find_element_by_id('ActiveStudentsprgDateRange')
+                elem = self.driver.find_element(By.ID, 'ActiveStudentsprgDateRange')
                 elem.click()
                 #TODO: Confirm no need to wait
             
-            self.driver.find_element_by_id("EnrollmentStartDate").send_keys(start_date)
-            self.driver.find_element_by_id("EnrollmentEndDate").send_keys(end_date)
+            self.driver.find_element(By.ID, "EnrollmentStartDate").send_keys(start_date)
+            self.driver.find_element(By.ID, "EnrollmentEndDate").send_keys(end_date)
             
-            select = Select(self.driver.find_element_by_id('EducationProgramCodesprgDateRange'))
+            select = Select(self.driver.find_element(By.ID, 'EducationProgramCodesprgDateRange'))
 
         #Select programs - defaulting to All TODO: Support specific programs.
         select.select_by_value("All")
@@ -498,74 +498,74 @@ class Calpads(WebUIDataSource, LoggingMixin):
     def __fill_crsc_request_extract(self, academic_year):
         """Handler for CRSC Extract request form."""
         if academic_year:
-            year = self.driver.find_element_by_name('AcademicYear_input')
+            year = self.driver.find_element(By.NAME, 'AcademicYear_input')
             year.clear()
             year.send_keys(academic_year)
     
     def __fill_crse_request_extract(self, academic_year):
         """Handler for CRSE Extract request form."""
         if academic_year:
-            year = self.driver.find_element_by_name('AcademicYear_input')
+            year = self.driver.find_element(By.NAME, 'AcademicYear_input')
             year.clear()
             year.send_keys(academic_year)
     
     def __fill_sass_request_extract(self, academic_year):
         """Handler for SASS Extract request form."""
         if academic_year:
-            year = self.driver.find_element_by_name('AcademicYear_input')
+            year = self.driver.find_element(By.NAME, 'AcademicYear_input')
             year.clear()
             year.send_keys(academic_year)
     
     def __fill_stas_request_extract(self, academic_year):
         """Handler for STAS Extract request form."""
         if academic_year:
-            year = self.driver.find_element_by_name('AcademicYear_input')
+            year = self.driver.find_element(By.NAME, 'AcademicYear_input')
             year.clear()
             year.send_keys(academic_year)
     
     def __fill_scte_request_extract(self, academic_year):
         """Handler for SCTE Extract request form."""
         if academic_year:
-            year = self.driver.find_element_by_name('AcademicYear_input')
+            year = self.driver.find_element(By.NAME, 'AcademicYear_input')
             year.clear()
             year.send_keys(academic_year)
     
     def __fill_scsc_request_extract(self, academic_year):
         """Handler for SCSC Extract request form."""
         if academic_year:
-            year = self.driver.find_element_by_name('AcademicYear_input')
+            year = self.driver.find_element(By.NAME, 'AcademicYear_input')
             year.clear()
             year.send_keys(academic_year)
 
     def __fill_scse_request_extract(self, academic_year):
         """Handler for SCSE Extract request form."""
         if academic_year:
-            year = self.driver.find_element_by_name('AcademicYear_input')
+            year = self.driver.find_element(By.NAME, 'AcademicYear_input')
             year.clear()
             year.send_keys(academic_year)
     
     def __fill_sdis_request_extract(self, academic_year):
         """Handler for SDIS Extract request form."""
         if academic_year:
-            year = self.driver.find_element_by_name('AcademicYear_input')
+            year = self.driver.find_element(By.NAME, 'AcademicYear_input')
             year.clear()
             year.send_keys(academic_year)
     
     def __fill_sdem_request_extract(self, active_staff, employment_start_date, employment_end_date, effective_start_date, effective_end_date):
         """Handler for SDEM Extract request form."""
         if active_staff:
-            self.driver.find_element_by_id('ActiveStaff').click()
+            self.driver.find_element(By.ID, 'ActiveStaff').click()
         else:
             #Must provide employment date range if not selecting active staff
             assert (employment_start_date is not None) and (employment_end_date is not None), "If active_staff is not True, employment start and end date must be provided."
         if employment_start_date:
-            self.driver.find_element_by_id('EmploymentStartDate').send_keys(employment_start_date)
+            self.driver.find_element(By.ID, 'EmploymentStartDate').send_keys(employment_start_date)
         if employment_end_date:
-            self.driver.find_element_by_id('EmploymentEndDate').send_keys(employment_end_date)
+            self.driver.find_element(By.ID, 'EmploymentEndDate').send_keys(employment_end_date)
         if effective_start_date:
-            self.driver.find_element_by_id('EffectiveStartDate').send_keys(effective_start_date)
+            self.driver.find_element(By.ID, 'EffectiveStartDate').send_keys(effective_start_date)
         if effective_end_date:
-            self.driver.find_element_by_id('EffectiveEndDate').send_keys(effective_end_date)
+            self.driver.find_element(By.ID, 'EffectiveEndDate').send_keys(effective_end_date)
 
     def __fill_cenr_request_extract(self, academic_year, adjusted_enroll, by_date_range, start_date, end_date):
         """Handler for CENR Extract request form.
@@ -576,13 +576,13 @@ class Calpads(WebUIDataSource, LoggingMixin):
         """
         if not by_date_range:
             #Academic year
-            year = self.driver.find_element_by_name('AcademicYear_input')
+            year = self.driver.find_element(By.NAME, 'AcademicYear_input')
             year.clear()
             year.send_keys(academic_year)
-            all_grades = Select(self.driver.find_element_by_id('GradeLevel'))
+            all_grades = Select(self.driver.find_element(By.ID, 'GradeLevel'))
         else:
             self._fill_typical_date_range_form(start_date, end_date)
-            all_grades = Select(self.driver.find_element_by_xpath("//div[contains(@id, 'DateRange')]//select[@id='GradeLevel']"))
+            all_grades = Select(self.driver.find_element(By.XPATH, "//div[contains(@id, 'DateRange')]//select[@id='GradeLevel']"))
 
         #Defaulting to all grades TODO: Maybe support specific grades? Doubt it'd be useful.
         all_grades.select_by_visible_text('All')
@@ -669,14 +669,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
             except TimeoutException:
                 raise Exception('The extract table took too long to load. Adjust the wait_time variable.')
             else:
-                extract_type = self.driver.find_element_by_xpath('//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[3]').text
-                extract_status = self.driver.find_element_by_xpath('//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[5]').text #expecting Complete
-                date_requested = dt.datetime.strptime(self.driver.find_element_by_xpath('//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[7]').text,
+                extract_type = self.driver.find_element(By.XPATH, '//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[3]').text
+                extract_status = self.driver.find_element(By.XPATH, '//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[5]').text #expecting Complete
+                date_requested = dt.datetime.strptime(self.driver.find_element(By.XPATH, '//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[7]').text,
                                                 "%m/%d/%Y %I:%M %p").date().strftime('%Y-%m-%d') #parse the text datetime on CALPADS, extract the date, format it to match today variable formatting
             
             if extract_type == expected_extract_types[extract_name] and extract_status == "Complete" and date_requested == today_ymd: 
                 current_file_num = list(os.walk(extract_download_folder_path))[0][2]
-                dlbutton = self.driver.find_element_by_xpath('//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[1]/a') #Select first download button
+                dlbutton = self.driver.find_element(By.XPATH, '//*[@id="ExtractRequestGrid"]/table/tbody/tr[1]/td[1]/a') #Select first download button
                 dlbutton.click()
                 wait_for_new_file_in_folder(extract_download_folder_path, current_file_num)
                 success = True
@@ -717,9 +717,9 @@ class Calpads(WebUIDataSource, LoggingMixin):
             #TODO: Might add another variable and if-condition to re-use for ODS as well as Snapshot
             return 'https://www.calpads.org/Report/Snapshot/8_1_StudentProfileList_EOY3_'
         else:
-            for i in self.driver.find_elements_by_class_name('num-wrap-in'):
+            for i in self.driver.find_elements(By.CLASS_NAME, 'num-wrap-in'):
                 if report_code == i.text:
-                    return i.find_element_by_xpath('./../../a').get_attribute('href')
+                    return i.find_element(By.XPATH, './../../a').get_attribute('href')
             raise ReportNotFound('{} report code cannot be found on the webpage'.format(report_code))
 
     def __wait_for_view_report_clickable(self, max_attempts, wait_time=60):
@@ -761,7 +761,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 dropdown_btn.click()
             try:
                 #Is the dropdown menu visible?
-                WebDriverWait(self.driver, 3).until(EC.visibility_of(self.driver.find_element_by_id('ReportViewer1_ctl09_ctl04_ctl00_Menu')))
+                WebDriverWait(self.driver, 3).until(EC.visibility_of(self.driver.find_element(By.ID, 'ReportViewer1_ctl09_ctl04_ctl00_Menu')))
             except TimeoutException:
                 #The dropdown menu is not visible
                 self.log.info('Download Attempt {} failed. Waiting 1 minute.'.format(attempts+1))
@@ -778,7 +778,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
             except NoSuchElementException:
                 #Occasionally it seems the report toolbar is potentially not loaded? Let's check if we need to click View Report again
                 if self.__wait_for_view_report_clickable(1, 2):
-                    view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00')
+                    view_report = self.driver.find_element(By.ID, 'ReportViewer1_ctl08_ctl00')
                     view_report.click()
                 self.log.info('Download Attempt {} failed. Waiting 10 seconds.'.format(attempts+1))
                 attempts += 1
@@ -803,13 +803,13 @@ class Calpads(WebUIDataSource, LoggingMixin):
         except NoSuchElementException:
             self.log.info('The web page did not request another login. Checking if the report page is up.')
         else:
-            user = self.driver.find_element_by_id("Username")
+            user = self.driver.find_element(By.ID, "Username")
             user.send_keys(self.username)
-            pw = self.driver.find_element_by_id("Password")
+            pw = self.driver.find_element(By.ID, "Password")
             pw.send_keys(self.password)
-            agreement = self.driver.find_element_by_id("AgreementConfirmed")
+            agreement = self.driver.find_element(By.ID, "AgreementConfirmed")
             self.driver.execute_script("arguments[0].click();", agreement)
-            btn = self.driver.find_element_by_class_name('btn-primary')
+            btn = self.driver.find_element(By.CLASS_NAME, 'btn-primary')
             btn.click() #TODO: Review code and add similar try/except/else situations
 
     def _download_report_on_page(self, lea_code, report_code, dl_folder=None, dl_type='csv', max_attempts=10,
@@ -821,14 +821,14 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #TODO: Consider data structure to keep track of LEAs that have had a particular report downloaded and when
         try:
             #In case it's not in the report iframe context
-            self.driver.switch_to.frame(self.driver.find_element_by_xpath('//*[@id="reports"]/div/div/div/iframe'))
+            self.driver.switch_to.frame(self.driver.find_element(By.XPATH, '//*[@id="reports"]/div/div/div/iframe'))
         except NoSuchElementException:
             pass
         if self.__wait_for_download_dropdown(lea_code, report_code, max_attempts):
             #TODO: CHANGE FOLDER TO BE TEMP/SPECIFIED FOLDER PATTERN
             current_file_num = list(os.walk(dl_folder))[0][2]
-            dl_options = self.driver.find_element_by_id('ReportViewer1_ctl09_ctl04_ctl00_Menu')
-            for dl_btn in dl_options.find_elements_by_tag_name('a'):
+            dl_options = self.driver.find_element(By.ID, 'ReportViewer1_ctl09_ctl04_ctl00_Menu')
+            for dl_btn in dl_options.find_elements(By.TAG_NAME, 'a'):
                 if dl_type.lower() in dl_btn.get_property('innerHTML').lower():
                     dl_btn.click()
             #script occasionally skips this function call for some reason
@@ -864,12 +864,12 @@ class Calpads(WebUIDataSource, LoggingMixin):
     def _parse_report_form(self, lea_code, max_attempts, dry_run, **kwargs):
         """Parse and when it's not a dry run, fill in the form."""
 
-        all_form_elements = self.driver.find_elements_by_xpath("//*[@data-parametername]")
+        all_form_elements = self.driver.find_elements(By.XPATH, "//*[@data-parametername]")
         params_dict = dict.fromkeys([i.get_attribute('data-parametername') for i in all_form_elements])
         for i in all_form_elements:
             tag_combos = []
             key = i.get_attribute('data-parametername')
-            for j in i.find_elements_by_xpath('.//*'):
+            for j in i.find_elements(By.XPATH, './/*'):
                 tag_combos.append(j.tag_name) #Find all the tags that are under the parameter div (i.e. where the form field is located)
                 if j.tag_name == 'span' and 'calendar' in j.get_attribute('class'):
                     tag_combos = tag_combos[:-2] #If it's a calendar date input, remove the last two tags so it's treated like a textbox
@@ -877,7 +877,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
 
         for k, v in params_dict.items():
             if v[0][0] == 'select':
-                select = Select(self.driver.find_element_by_xpath("//*[@data-parametername='{}']//select".format(k)))
+                select = Select(self.driver.find_element(By.XPATH, "//*[@data-parametername='{}']//select".format(k)))
                 v.append(('select', tuple(i.text for i in select.options)))
                                 
             elif v[0][-1] == 'input':
@@ -887,12 +887,12 @@ class Calpads(WebUIDataSource, LoggingMixin):
                 v.append(('textbox_defaultnull', 'plain text'))
 
             else:
-                form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(k))
+                form_input_div = self.driver.find_element(By.XPATH, "//*[@data-parametername='{}']".format(k))
                 div_id = form_input_div.get_attribute('id') + '_divDropDown'
                 #More reliable to use execute script to avoid "other element would get the click error"
-                self.driver.execute_script('arguments[0].click();', form_input_div.find_element_by_xpath('.//input')) #Reveal the options
-                div_for_input = self.driver.find_element_by_xpath('//div[@id="{}"]'.format(div_id))
-                all_input_labels = div_for_input.find_elements_by_xpath('.//input[@type != "hidden"]/following-sibling::label')
+                self.driver.execute_script('arguments[0].click();', form_input_div.find_element(By.XPATH, './/input')) #Reveal the options
+                div_for_input = self.driver.find_element(By.XPATH, '//div[@id="{}"]'.format(div_id))
+                all_input_labels = div_for_input.find_elements(By.XPATH, './/input[@type != "hidden"]/following-sibling::label')
                 all_input_labels_txt = [i.text for i in all_input_labels]
                 dict_opts = dict.fromkeys(all_input_labels_txt, (True, False))
                 v.append(('dropdown', dict_opts))
@@ -908,33 +908,33 @@ class Calpads(WebUIDataSource, LoggingMixin):
         for a, b in kwargs.items():
             if params_dict.get(a): #ensure the key is expected, if unexpected it will do nothing.
                 if params_dict[a][1][0] == 'select':
-                    select = Select(self.driver.find_element_by_xpath("//*[@data-parametername='{}']//select".format(a)))
+                    select = Select(self.driver.find_element(By.XPATH, "//*[@data-parametername='{}']//select".format(a)))
                     select.select_by_visible_text(b)
                     if not self.__wait_for_view_report_clickable(max_attempts):
                         self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
                         return False
                 
                 elif params_dict[a][1][0] == 'textbox':
-                    form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
-                    form_input_div.find_element_by_xpath('.//input').send_keys(b)
+                    form_input_div = self.driver.find_element(By.XPATH, "//*[@data-parametername='{}']".format(a))
+                    form_input_div.find_element(By.XPATH, './/input').send_keys(b)
                     if not self.__wait_for_view_report_clickable(max_attempts):
                         self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
                         return False
                 
                 elif params_dict[a][1][0] == 'textbox_defaultnull':
-                    form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
-                    form_input_div.find_element_by_xpath(".//label/preceding-sibling::input").click() #Uncheck the NULL value
-                    form_input_div.find_element_by_xpath('.//input').send_keys(b) #Send value to the first input
+                    form_input_div = self.driver.find_element(By.XPATH, "//*[@data-parametername='{}']".format(a))
+                    form_input_div.find_element(By.XPATH, ".//label/preceding-sibling::input").click() #Uncheck the NULL value
+                    form_input_div.find_element(By.XPATH, './/input').send_keys(b) #Send value to the first input
                     if not self.__wait_for_view_report_clickable(max_attempts):
                         self.log.info('A requested form value change failed to occur. Discontinuing report download for LEA: {}'.format(lea_code))
                         return False
                 else:
                     #Expecting the rest to be dropdowns only
-                    form_input_div = self.driver.find_element_by_xpath("//*[@data-parametername='{}']".format(a))
+                    form_input_div = self.driver.find_element(By.XPATH, "//*[@data-parametername='{}']".format(a))
                     div_id = form_input_div.get_attribute('id') + '_divDropDown'
-                    self.driver.execute_script('arguments[0].click();', form_input_div.find_element_by_xpath('.//input')) #Reveal the options
-                    div_for_input = self.driver.find_element_by_xpath('//div[@id="{}"]'.format(div_id))
-                    all_inputs = div_for_input.find_elements_by_xpath('.//input[@type != "hidden"]')
+                    self.driver.execute_script('arguments[0].click();', form_input_div.find_element(By.XPATH, './/input')) #Reveal the options
+                    div_for_input = self.driver.find_element(By.XPATH, '//div[@id="{}"]'.format(div_id))
+                    all_inputs = div_for_input.find_elements(By.XPATH, './/input[@type != "hidden"]')
                     all_inputs[0].click() #Click the select all to clear all options
                     if all_inputs[0].get_attribute('checked'):
                         #A few reports start off as unchecked, confirm that the "Select All" option is in expected state
@@ -999,7 +999,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #Report link lookup
         self.driver.get('https://www.calpads.org/Report/Snapshot')
         self.driver.get(self.__get_report_link(report_code))
-        self.driver.switch_to.frame(self.driver.find_element_by_xpath('//*[@id="reports"]//iframe'))
+        self.driver.switch_to.frame(self.driver.find_element(By.XPATH, '//*[@id="reports"]//iframe'))
 
         self.__check_login_request()
 
@@ -1012,11 +1012,11 @@ class Calpads(WebUIDataSource, LoggingMixin):
             return parsed_params_dict
         
         if self.__wait_for_view_report_clickable(max_attempts):
-            view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
+            view_report = self.driver.find_element(By.ID, 'ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
             view_report.click()
             #Some reports require two clicks of View Report for no apparent reason
             if report_code in ['3.2', '3.3', '8.1eoy3', '1.21'] and self.__wait_for_view_report_clickable(1):
-                view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00')
+                view_report = self.driver.find_element(By.ID, 'ReportViewer1_ctl08_ctl00')
                 view_report.click()
 
         result = self._download_report_on_page(max_attempts=max_attempts, lea_code=lea_code, report_code=report_code, 
@@ -1074,7 +1074,7 @@ class Calpads(WebUIDataSource, LoggingMixin):
         #Report link lookup
         self.driver.get('https://www.calpads.org/Report/ODS')
         self.driver.get(self.__get_report_link(report_code, is_snapshot=False))
-        self.driver.switch_to.frame(self.driver.find_element_by_xpath('//*[@id="reports"]//iframe'))
+        self.driver.switch_to.frame(self.driver.find_element(By.XPATH, '//*[@id="reports"]//iframe'))
 
         self.__check_login_request()
 
@@ -1087,12 +1087,12 @@ class Calpads(WebUIDataSource, LoggingMixin):
             return parsed_params_dict
         
         if self.__wait_for_view_report_clickable(max_attempts):
-            view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
+            view_report = self.driver.find_element(By.ID, 'ReportViewer1_ctl08_ctl00') #Have to find the element again to avoid StaleElementReference error
             view_report.click()
             #Some reports require two clicks of View Report for no apparent reason
             if (report_code in ['1.2', '1.3', '1.5', '12.1', '3.2', '3.3', '3.6', '5.1', '10.1', '11.1', '9.2'] 
                     and self.__wait_for_view_report_clickable(1, 2)):
-                view_report = self.driver.find_element_by_id('ReportViewer1_ctl08_ctl00')
+                view_report = self.driver.find_element(By.ID, 'ReportViewer1_ctl08_ctl00')
                 view_report.click()
 
         result = self._download_report_on_page(lea_code=lea_code, report_code=report_code, dl_folder=report_download_folder_path, 
